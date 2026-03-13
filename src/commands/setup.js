@@ -25,6 +25,12 @@ async function applyPermissions(channel, overwrites) {
     await channel.permissionOverwrites.set(overwrites);
 }
 
+function formatPermissionName(permission) {
+    return permission
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 async function enforceRoleVisibilityScope(guild, roleIds, allowedChannelIds, allowedCategoryIds) {
     for (const channel of guild.channels.cache.values()) {
         const isAllowed = allowedChannelIds.has(channel.id) || (channel.parentId && allowedCategoryIds.has(channel.parentId)) || allowedCategoryIds.has(channel.id);
@@ -68,9 +74,41 @@ module.exports = {
             const clientRoleId = process.env.ROLE_CLIENT;
             const managementRoleId = process.env.ROLE_MANAGEMENT;
             const adminRoleId = process.env.ROLE_ADMIN;
+            const botMember = interaction.guild.members.me;
 
             if (!clientCategoryId || !boosterCategoryId) {
                 return interaction.editReply({ content: '❌ Please configure CHANNEL_CLIENT_CATEGORY and CHANNEL_BOOSTER_CATEGORY in your .env file first.' });
+            }
+
+            const requiredGuildPermissions = [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+                PermissionFlagsBits.ManageChannels,
+            ];
+
+            const missingGuildPermissions = requiredGuildPermissions.filter(permission => !botMember.permissions.has(permission));
+            if (missingGuildPermissions.length > 0) {
+                return interaction.editReply({
+                    content: `❌ The bot is missing required server permissions for \`/setup\`: ${missingGuildPermissions.map(formatPermissionName).join(', ')}. Give the bot these permissions or Administrator, then try again.`
+                });
+            }
+
+            const clientCategory = await interaction.guild.channels.fetch(clientCategoryId);
+            const boosterCategory = await interaction.guild.channels.fetch(boosterCategoryId);
+            if (!clientCategory || !boosterCategory) {
+                throw new Error('Configured client or booster category could not be found.');
+            }
+
+            const categoryPermissionsToCheck = [clientCategory, boosterCategory];
+            for (const category of categoryPermissionsToCheck) {
+                const categoryPerms = category.permissionsFor(botMember);
+                const missingCategoryPermissions = requiredGuildPermissions.filter(permission => !categoryPerms?.has(permission));
+                if (missingCategoryPermissions.length > 0) {
+                    return interaction.editReply({
+                        content: `❌ The bot cannot manage the category \`${category.name}\`. Missing there: ${missingCategoryPermissions.map(formatPermissionName).join(', ')}. Fix that category's overwrites for the bot role, then run \`/setup\` again.`
+                    });
+                }
             }
 
             // Create welcome channel with ticket button
@@ -127,12 +165,6 @@ module.exports = {
 
             await welcomeChannel.send({ embeds: [welcomeEmbed], components: [onboardingRow] });
             await welcomeChannel.send({ embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] });
-
-            const clientCategory = await interaction.guild.channels.fetch(clientCategoryId);
-            const boosterCategory = await interaction.guild.channels.fetch(boosterCategoryId);
-            if (!clientCategory || !boosterCategory) {
-                throw new Error('Configured client or booster category could not be found.');
-            }
 
             await applyPermissions(clientCategory, [
                 {

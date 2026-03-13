@@ -137,6 +137,52 @@ async function registerMultipleCharacters(boosterId, rawInput) {
     }
 }
 
+async function registerCharacterEntries(boosterId, entries) {
+    try {
+        const uniqueEntries = [];
+        const seen = new Set();
+
+        for (const entry of entries.slice(0, 20)) {
+            if (!entry?.characterName || !entry?.characterRealm) {
+                continue;
+            }
+
+            const key = `${entry.characterName.toLowerCase()}|${entry.characterRealm.toLowerCase()}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueEntries.push(entry);
+            }
+        }
+
+        if (uniqueEntries.length === 0) {
+            return {
+                success: false,
+                message: 'No valid character entries were provided.',
+            };
+        }
+
+        const successes = [];
+        const failures = [];
+        for (const entry of uniqueEntries) {
+            const result = await registerCharacter(boosterId, entry.characterName, entry.characterRealm);
+            if (result.success) {
+                successes.push(`${entry.characterName}-${entry.characterRealm}`);
+            } else {
+                failures.push(`${entry.characterName}-${entry.characterRealm}: ${result.message}`);
+            }
+        }
+
+        return {
+            success: successes.length > 0,
+            successes,
+            failures,
+        };
+    } catch (error) {
+        logger.logError(error, { context: 'REGISTER_CHARACTER_ENTRIES', boosterId });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
 // Get all characters for a booster
 async function getBoosterCharacters(boosterId) {
     try {
@@ -367,5 +413,6 @@ module.exports = {
     getNextWednesday,
     getMythicPlusLockUntil,
     registerMultipleCharacters,
+    registerCharacterEntries,
     getCharacterRefreshIntervalMinutes,
 };

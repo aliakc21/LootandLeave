@@ -9,6 +9,39 @@ const Database = require('../database/database');
 const createApproveRaidTicketModal = require('../modals/approveRaidTicketModal');
 const createApproveMythicTicketModal = require('../modals/approveMythicTicketModal');
 const { MIDNIGHT_RAIDS } = require('../utils/contentCatalog');
+const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
+
+function buildRegisterCharacterSessionMessage(session) {
+    const queuedCharacters = session.characters.length > 0
+        ? session.characters.map((entry, index) => `${index + 1}. ${entry.characterName}-${entry.characterRealm}`).join('\n')
+        : 'No characters queued yet.';
+
+    const actionRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`add_register_character_${session.sessionId}`)
+            .setLabel('Add Another Character')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('➕')
+            .setDisabled(session.characters.length >= 20),
+        new ButtonBuilder()
+            .setCustomId(`finish_register_characters_${session.sessionId}`)
+            .setLabel('Finish Registration')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅')
+            .setDisabled(session.characters.length === 0),
+        new ButtonBuilder()
+            .setCustomId(`cancel_register_characters_${session.sessionId}`)
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('✖️')
+    );
+
+    return {
+        content: `Queued characters (${session.characters.length}/20):\n${queuedCharacters}`,
+        components: [actionRow],
+        flags: MessageFlags.Ephemeral
+    };
+}
 
 // Check if user has permission
 function hasPermission(member, roles) {
@@ -50,7 +83,61 @@ async function handleButton(interaction) {
 
     if (customId === 'open_register_characters_modal') {
         const createRegisterCharactersModal = require('../modals/registerCharactersModal');
-        await interaction.showModal(createRegisterCharactersModal());
+        const session = registerCharacterSessionStore.createSession(interaction.user.id);
+        await interaction.showModal(createRegisterCharactersModal(session.sessionId));
+        return;
+    }
+
+    if (customId.startsWith('add_register_character_')) {
+        const sessionId = customId.replace('add_register_character_', '');
+        const session = registerCharacterSessionStore.getSession(sessionId);
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.reply({ content: '❌ This register session has expired. Please start again.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const createRegisterCharactersModal = require('../modals/registerCharactersModal');
+        await interaction.showModal(createRegisterCharactersModal(sessionId));
+        return;
+    }
+
+    if (customId.startsWith('finish_register_characters_')) {
+        await interaction.update({ content: '⏳ Registering queued characters...', components: [] });
+
+        const sessionId = customId.replace('finish_register_characters_', '');
+        const session = registerCharacterSessionStore.getSession(sessionId);
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.editReply({ content: '❌ This register session has expired. Please start again.' });
+            return;
+        }
+
+        const result = await characterSystem.registerCharacterEntries(interaction.user.id, session.characters);
+        registerCharacterSessionStore.clearSession(sessionId);
+
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        const lines = [`✅ Registered or updated ${result.successes.length} character(s).`];
+        if (result.successes.length > 0) {
+            lines.push(`Success: ${result.successes.join(', ')}`.slice(0, 1900));
+        }
+        if (result.failures.length > 0) {
+            lines.push(`Failed: ${result.failures.join(' | ')}`.slice(0, 1900));
+        }
+
+        await interaction.editReply({ content: lines.join('\n') });
+        return;
+    }
+
+    if (customId.startsWith('cancel_register_characters_')) {
+        const sessionId = customId.replace('cancel_register_characters_', '');
+        const session = registerCharacterSessionStore.getSession(sessionId);
+        if (session && session.userId === interaction.user.id) {
+            registerCharacterSessionStore.clearSession(sessionId);
+        }
+        await interaction.update({ content: 'Registration cancelled.', components: [] });
         return;
     }
 

@@ -1,4 +1,4 @@
-const { MessageFlags, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const calendarSystem = require('./calendarSystem');
 const applicationSystem = require('./applicationSystem');
 const characterSystem = require('./characterSystem');
@@ -8,6 +8,7 @@ const { EmbedBuilder } = require('discord.js');
 const { buildRaidEventName } = require('../utils/contentCatalog');
 const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
 const mplusRequestStore = require('../utils/mplusRequestStore');
+const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
 
 function buildMythicDungeonSelect(sessionId, runNumber) {
     const dungeonSelectMenu = new StringSelectMenuBuilder()
@@ -21,6 +22,36 @@ function buildMythicDungeonSelect(sessionId, runNumber) {
         );
 
     return new ActionRowBuilder().addComponents(dungeonSelectMenu);
+}
+
+function buildRegisterCharacterSessionResponse(session) {
+    const queuedCharacters = session.characters.length > 0
+        ? session.characters.map((entry, index) => `${index + 1}. ${entry.characterName}-${entry.characterRealm}`).join('\n')
+        : 'No characters queued yet.';
+
+    return {
+        content: `Queued characters (${session.characters.length}/20):\n${queuedCharacters}`,
+        components: [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`add_register_character_${session.sessionId}`)
+                    .setLabel('Add Another Character')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('➕')
+                    .setDisabled(session.characters.length >= 20),
+                new ButtonBuilder()
+                    .setCustomId(`finish_register_characters_${session.sessionId}`)
+                    .setLabel('Finish Registration')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('✅'),
+                new ButtonBuilder()
+                    .setCustomId(`cancel_register_characters_${session.sessionId}`)
+                    .setLabel('Cancel')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('✖️')
+            )
+        ],
+    };
 }
 
 async function handleModal(interaction) {
@@ -44,35 +75,31 @@ async function handleModal(interaction) {
         return;
     }
 
-    if (customId === 'register_characters_modal') {
+    if (customId.startsWith('register_characters_modal:')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const singleCharacter = interaction.fields.getTextInputValue('single_character').trim();
-        const multipleCharacters = interaction.fields.getTextInputValue('multiple_characters').trim();
-        const combinedInput = [singleCharacter, multipleCharacters].filter(Boolean).join('\n');
+        const sessionId = customId.split(':')[1];
+        const session = registerCharacterSessionStore.getSession(sessionId);
+        const characterName = interaction.fields.getTextInputValue('character_name').trim();
+        const characterRealm = interaction.fields.getTextInputValue('character_realm').trim();
 
-        if (!combinedInput) {
-            await interaction.editReply({
-                content: '❌ Please enter at least one character using the format `Character-Realm`.'
-            });
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.editReply({ content: '❌ This register session has expired. Please start again.' });
             return;
         }
 
-        const result = await characterSystem.registerMultipleCharacters(interaction.user.id, combinedInput);
-        if (!result.success) {
-            await interaction.editReply({ content: `❌ ${result.message}` });
+        if (!characterName || !characterRealm) {
+            await interaction.editReply({ content: '❌ Character name and realm are both required.' });
             return;
         }
 
-        const lines = [`✅ Registered or updated ${result.successes.length} character(s).`];
-        if (result.successes.length > 0) {
-            lines.push(`Success: ${result.successes.join(', ')}`.slice(0, 1900));
-        }
-        if (result.failures.length > 0) {
-            lines.push(`Failed: ${result.failures.join(' | ')}`.slice(0, 1900));
+        const addResult = registerCharacterSessionStore.addCharacter(sessionId, characterName, characterRealm);
+        if (!addResult.success) {
+            await interaction.editReply({ content: `❌ ${addResult.message}` });
+            return;
         }
 
-        await interaction.editReply({ content: lines.join('\n') });
+        await interaction.editReply(buildRegisterCharacterSessionResponse(addResult.session));
         return;
     }
 

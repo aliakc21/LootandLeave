@@ -67,6 +67,7 @@ module.exports = {
             const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
             const clientRoleId = process.env.ROLE_CLIENT;
             const managementRoleId = process.env.ROLE_MANAGEMENT;
+            const adminRoleId = process.env.ROLE_ADMIN;
 
             if (!clientCategoryId || !boosterCategoryId) {
                 return interaction.editReply({ content: '❌ Please configure CHANNEL_CLIENT_CATEGORY and CHANNEL_BOOSTER_CATEGORY in your .env file first.' });
@@ -188,7 +189,6 @@ module.exports = {
             ]);
 
             // Create admin-only event management channel with create event button
-            const adminRoleId = process.env.ROLE_ADMIN;
             const eventManagementChannel = await getOrCreateTextChannel(interaction.guild, 'event-management', {
                 permissionOverwrites: [
                     {

@@ -36,8 +36,10 @@ async function processPayout(totalGold, boosterIds, createdBy, eventId = null, j
             // Update booster balance
             await Database.run(
                 `INSERT INTO booster_balances (booster_id, balance) VALUES (?, ?)
-                 ON CONFLICT(booster_id) DO UPDATE SET balance = balance + ?, last_updated = CURRENT_TIMESTAMP`,
-                [boosterId, boosterIndividualAmount, boosterIndividualAmount]
+                 ON CONFLICT(booster_id) DO UPDATE
+                 SET balance = booster_balances.balance + EXCLUDED.balance,
+                     last_updated = CURRENT_TIMESTAMP`,
+                [boosterId, boosterIndividualAmount]
             );
         }
 

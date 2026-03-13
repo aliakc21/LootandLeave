@@ -1,0 +1,300 @@
+const { MessageFlags } = require('discord.js');
+const calendarSystem = require('./calendarSystem');
+const applicationSystem = require('./applicationSystem');
+const characterSystem = require('./characterSystem');
+const ticketSystem = require('./ticketSystem');
+const logger = require('../utils/logger');
+const { EmbedBuilder } = require('discord.js');
+const { buildRaidEventName } = require('../utils/contentCatalog');
+const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
+
+async function handleModal(interaction) {
+    const { customId } = interaction;
+
+    // Booster application modal
+    if (customId === 'booster_application_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const characterName = interaction.fields.getTextInputValue('character_name');
+        const characterRealm = interaction.fields.getTextInputValue('character_realm');
+        const experience = interaction.fields.getTextInputValue('experience');
+
+        const result = await applicationSystem.processApplication(interaction.user.id, characterName, characterRealm, experience);
+
+        if (result.success) {
+            await interaction.editReply({ content: '✅ Application submitted successfully! Management will review it shortly.' });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('mythic_plus_ticket_modal:')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const dungeonId = customId.split(':')[1];
+        const dungeon = MIDNIGHT_DUNGEONS.find(entry => entry.id === dungeonId);
+        const keyLevelInput = interaction.fields.getTextInputValue('key_level').trim();
+        const amountInput = interaction.fields.getTextInputValue('amount').trim();
+
+        const keyLevel = parseInt(keyLevelInput, 10);
+        const amount = parseInt(amountInput, 10);
+
+        if (!dungeon) {
+            await interaction.editReply({ content: '❌ Invalid dungeon selection.' });
+            return;
+        }
+
+        if (Number.isNaN(keyLevel) || keyLevel <= 0) {
+            await interaction.editReply({ content: '❌ Key level must be a positive number.' });
+            return;
+        }
+
+        if (Number.isNaN(amount) || amount <= 0) {
+            await interaction.editReply({ content: '❌ Amount of runs must be a positive number.' });
+            return;
+        }
+
+        try {
+            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
+                boost_type: 'mythic_plus',
+                boost_label: dungeon.label,
+                boost_key_level: keyLevel,
+                boost_amount: amount,
+            });
+
+            await interaction.editReply({ content: `✅ Ticket created for Mythic+ request! ${result.channel}` });
+        } catch (error) {
+            logger.logError(error, { context: 'MYTHIC_PLUS_TICKET_MODAL', userId: interaction.user.id });
+            await interaction.editReply({ content: '❌ An error occurred while creating your Mythic+ ticket.' });
+        }
+        return;
+    }
+
+    if (customId === 'support_ticket_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const supportTopic = interaction.fields.getTextInputValue('support_topic').trim();
+        if (!supportTopic) {
+            await interaction.editReply({ content: '❌ Please describe what you need help with.' });
+            return;
+        }
+
+        try {
+            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
+                boost_type: 'support',
+                boost_label: supportTopic,
+                boost_amount: 1,
+            });
+
+            await interaction.editReply({ content: `✅ Support ticket created! ${result.channel}` });
+        } catch (error) {
+            logger.logError(error, { context: 'SUPPORT_TICKET_MODAL', userId: interaction.user.id });
+            await interaction.editReply({ content: '❌ An error occurred while creating your support ticket.' });
+        }
+        return;
+    }
+
+    if (customId === 'raid_request_ticket_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const raidRequest = interaction.fields.getTextInputValue('raid_request').trim();
+        if (!raidRequest) {
+            await interaction.editReply({ content: '❌ Please describe the dedicated raid you want.' });
+            return;
+        }
+
+        try {
+            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
+                boost_type: 'raid_request',
+                boost_label: raidRequest,
+                boost_amount: 1,
+            });
+
+            await interaction.editReply({ content: `✅ Raid request ticket created! ${result.channel}` });
+        } catch (error) {
+            logger.logError(error, { context: 'RAID_REQUEST_TICKET_MODAL', userId: interaction.user.id });
+            await interaction.editReply({ content: '❌ An error occurred while creating your raid request ticket.' });
+        }
+        return;
+    }
+
+    if (customId.startsWith('create_event_panel_modal:')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const [, raidId, difficultyId] = customId.split(':');
+        const eventName = buildRaidEventName(raidId, difficultyId);
+        const datePart = interaction.fields.getTextInputValue('event_date').trim();
+        const timePart = interaction.fields.getTextInputValue('event_time').trim();
+        const minItemLevelInput = interaction.fields.getTextInputValue('min_item_level').trim();
+        const minRioScoreInput = interaction.fields.getTextInputValue('min_rio_score').trim();
+        const capacityInput = interaction.fields.getTextInputValue('capacity').trim();
+
+        if (!eventName) {
+            await interaction.editReply({ content: '❌ Invalid raid or difficulty selection.' });
+            return;
+        }
+
+        const [day, month, year] = datePart.split('-').map(Number);
+        const [hours, minutes] = timePart.split(':').map(Number);
+        const scheduledDate = new Date(year, month - 1, day, hours, minutes);
+        const minItemLevel = minItemLevelInput ? parseInt(minItemLevelInput, 10) : 0;
+        const minRioScore = minRioScoreInput ? parseInt(minRioScoreInput, 10) : 0;
+        const clientLimit = capacityInput ? parseInt(capacityInput, 10) : 0;
+
+        if (Number.isNaN(scheduledDate.getTime())) {
+            await interaction.editReply({ content: '❌ Invalid date/time. Use DD-MM-YYYY and HH:MM.' });
+            return;
+        }
+
+        if ([minItemLevel, minRioScore, clientLimit].some(value => Number.isNaN(value) || value < 0)) {
+            await interaction.editReply({ content: '❌ Minimum item level, Raider.IO score, and capacity must be zero or higher.' });
+            return;
+        }
+
+        try {
+            const result = await calendarSystem.createEvent(
+                eventName,
+                '',
+                scheduledDate,
+                interaction.user.id,
+                interaction.guild,
+                { minItemLevel, minRioScore, clientLimit }
+            );
+
+            await interaction.editReply({
+                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Capacity:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}`
+            });
+        } catch (error) {
+            logger.logError(error, { context: 'CREATE_EVENT_PANEL_MODAL', userId: interaction.user.id, raidId, difficultyId });
+            await interaction.editReply({ content: '❌ An error occurred while creating the event.' });
+        }
+        return;
+    }
+
+    if (customId.startsWith('approve_raid_ticket_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const ticketId = customId.replace('approve_raid_ticket_modal_', '');
+        const eventId = interaction.fields.getTextInputValue('event_id').trim();
+        const settledGoldInput = interaction.fields.getTextInputValue('settled_gold').trim();
+        const settledGold = parseInt(settledGoldInput, 10);
+
+        if (!eventId) {
+            await interaction.editReply({ content: '❌ Event ID is required.' });
+            return;
+        }
+
+        if (Number.isNaN(settledGold) || settledGold <= 0) {
+            await interaction.editReply({ content: '❌ Settled gold must be a positive number.' });
+            return;
+        }
+
+        try {
+            const assignment = await calendarSystem.assignClientToEvent(ticketId, eventId, interaction.user.id, settledGold);
+            if (!assignment.success) {
+                await interaction.editReply({ content: `❌ ${assignment.message}` });
+                return;
+            }
+
+            const ticket = await require('../database/database').get(`SELECT * FROM tickets WHERE ticket_id = ?`, [ticketId]);
+            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+            embed.setFields([
+                ...ticketSystem.getTicketRequestFields(ticket),
+                ...ticketSystem.getTicketApprovalFields(ticket)
+            ]);
+            embed.setColor(0x00FF00);
+            await interaction.message.edit({
+                embeds: [embed],
+                components: ticketSystem.buildTicketActionRows(ticket)
+            });
+
+            await calendarSystem.updateEventRoster(eventId);
+
+            await interaction.editReply({
+                content: `✅ Ticket approved and client assigned to \`${eventId}\` for ${settledGold.toLocaleString()}g.`
+            });
+        } catch (error) {
+            logger.logError(error, { context: 'APPROVE_RAID_TICKET_MODAL', userId: interaction.user.id, ticketId, eventId });
+            await interaction.editReply({ content: '❌ An error occurred while approving the raid ticket.' });
+        }
+        return;
+    }
+
+    if (customId.startsWith('approve_mythic_ticket_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const ticketId = customId.replace('approve_mythic_ticket_modal_', '');
+        const settledGoldInput = interaction.fields.getTextInputValue('settled_gold').trim();
+        const settledGold = parseInt(settledGoldInput, 10);
+
+        if (Number.isNaN(settledGold) || settledGold <= 0) {
+            await interaction.editReply({ content: '❌ Settled gold must be a positive number.' });
+            return;
+        }
+
+        try {
+            const approval = await calendarSystem.approveMythicTicket(ticketId, interaction.user.id, settledGold, interaction.guild);
+            if (!approval.success) {
+                await interaction.editReply({ content: `❌ ${approval.message}` });
+                return;
+            }
+
+            const ticket = await require('../database/database').get(`SELECT * FROM tickets WHERE ticket_id = ?`, [ticketId]);
+            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+            embed.setFields([
+                ...ticketSystem.getTicketRequestFields(ticket),
+                ...ticketSystem.getTicketApprovalFields(ticket)
+            ]);
+            embed.setColor(0x00FF00);
+            await interaction.message.edit({
+                embeds: [embed],
+                components: ticketSystem.buildTicketActionRows(ticket)
+            });
+
+            await calendarSystem.updateEventRoster(approval.eventId);
+
+            await interaction.editReply({
+                content: `✅ Mythic+ ticket approved for ${settledGold.toLocaleString()}g. Roster channel created: ${approval.channel}`
+            });
+        } catch (error) {
+            logger.logError(error, { context: 'APPROVE_MYTHIC_TICKET_MODAL', userId: interaction.user.id, ticketId });
+            await interaction.editReply({ content: '❌ An error occurred while approving the Mythic+ ticket.' });
+        }
+        return;
+    }
+
+    // Event application modal (deprecated - now using select menu)
+    if (customId.startsWith('event_application_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: 'This method is deprecated. Please use the character selection menu.' });
+        return;
+    }
+
+    // End event modal
+    if (customId.startsWith('end_event_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        
+        const eventId = customId.replace('end_event_modal_', '');
+        const totalGoldInput = interaction.fields.getTextInputValue('total_gold');
+        
+        const totalGold = parseInt(totalGoldInput);
+        if (isNaN(totalGold) || totalGold <= 0) {
+            await interaction.editReply({ content: '❌ Invalid gold amount. Please enter a positive number.' });
+            return;
+        }
+
+        const result = await calendarSystem.endEvent(eventId, totalGold, interaction.user.id);
+        
+        if (result.success) {
+            await interaction.editReply({ content: `✅ ${result.message}` });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+}
+
+module.exports = {
+    handleModal,
+};

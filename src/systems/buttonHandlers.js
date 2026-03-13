@@ -1,0 +1,427 @@
+const { MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const ticketSystem = require('./ticketSystem');
+const calendarSystem = require('./calendarSystem');
+const applicationSystem = require('./applicationSystem');
+const characterSystem = require('./characterSystem');
+const logger = require('../utils/logger');
+const createEndEventModal = require('../modals/endEventModal');
+const Database = require('../database/database');
+const createApproveRaidTicketModal = require('../modals/approveRaidTicketModal');
+const createApproveMythicTicketModal = require('../modals/approveMythicTicketModal');
+const { MIDNIGHT_RAIDS } = require('../utils/contentCatalog');
+
+// Check if user has permission
+function hasPermission(member, roles) {
+    if (member.permissions.has('Administrator')) {
+        return true;
+    }
+
+    const adminRole = process.env.ROLE_ADMIN;
+    const managementRole = process.env.ROLE_MANAGEMENT;
+    const advertiserRole = process.env.ROLE_ADVERTISER;
+    const raidLeaderRole = process.env.ROLE_RAID_LEADER;
+
+    if (roles.includes('admin') && adminRole && member.roles.cache.has(adminRole)) {
+        return true;
+    }
+    if (roles.includes('management') && managementRole && member.roles.cache.has(managementRole)) {
+        return true;
+    }
+    if (roles.includes('advertiser') && advertiserRole && member.roles.cache.has(advertiserRole)) {
+        return true;
+    }
+    if (roles.includes('raid_leader') && raidLeaderRole && member.roles.cache.has(raidLeaderRole)) {
+        return true;
+    }
+
+    return false;
+}
+
+async function handleButton(interaction) {
+    const { customId } = interaction;
+
+    // Booster application button
+    if (customId === 'booster_application_button') {
+        const createBoosterApplicationModal = require('../modals/boosterApplicationModal');
+        const modal = createBoosterApplicationModal();
+        await interaction.showModal(modal);
+        return;
+    }
+
+    // Create ticket button
+    if (customId === 'create_ticket') {
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('ticket_type_select')
+            .setPlaceholder('Choose the type of boost you want')
+            .addOptions(
+                {
+                    label: 'Raid',
+                    description: 'Pick from the available scheduled raids',
+                    value: 'raid',
+                },
+                {
+                    label: 'Mythic+',
+                    description: 'Request a dungeon, key level, and amount of runs',
+                    value: 'mythic_plus',
+                },
+                {
+                    label: 'Support',
+                    description: 'Talk to a representative or ask for help',
+                    value: 'support',
+                },
+                {
+                    label: 'Raid Request',
+                    description: 'Ask for a raid when the listed raids are not suitable',
+                    value: 'raid_request',
+                }
+            );
+
+        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+
+        await interaction.reply({
+            content: 'Select the type of boost you want:',
+            components: [actionRow],
+            flags: MessageFlags.Ephemeral
+        });
+        return;
+    }
+
+    if (customId === 'create_event_panel') {
+        if (!hasPermission(interaction.member, ['admin'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const raidSelectMenu = new StringSelectMenuBuilder()
+            .setCustomId('admin_event_raid_select')
+            .setPlaceholder('Choose the raid to create')
+            .addOptions(
+                MIDNIGHT_RAIDS.map(raid => ({
+                    label: raid.label,
+                    value: raid.id,
+                }))
+            );
+
+        await interaction.reply({
+            content: 'Choose the raid to create:',
+            components: [new ActionRowBuilder().addComponents(raidSelectMenu)],
+            flags: MessageFlags.Ephemeral
+        });
+        return;
+    }
+
+    if (customId.startsWith('approve_raid_ticket_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const ticketId = customId.replace('approve_raid_ticket_', '');
+        const ticket = await Database.get(`SELECT * FROM tickets WHERE ticket_id = ?`, [ticketId]);
+        if (!ticket) {
+            await interaction.reply({ content: '❌ Ticket not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (!['raid', 'raid_request'].includes(ticket.boost_type)) {
+            await interaction.reply({ content: '❌ This ticket is not a raid assignment ticket.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (ticket.approval_status === 'approved') {
+            await interaction.reply({ content: '❌ This ticket is already approved.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.showModal(createApproveRaidTicketModal(ticket));
+        return;
+    }
+
+    if (customId.startsWith('approve_mythic_ticket_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const ticketId = customId.replace('approve_mythic_ticket_', '');
+        const ticket = await Database.get(`SELECT * FROM tickets WHERE ticket_id = ?`, [ticketId]);
+        if (!ticket) {
+            await interaction.reply({ content: '❌ Ticket not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (ticket.boost_type !== 'mythic_plus') {
+            await interaction.reply({ content: '❌ This ticket is not a Mythic+ ticket.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (ticket.approval_status === 'approved') {
+            await interaction.reply({ content: '❌ This ticket is already approved.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.showModal(createApproveMythicTicketModal(ticket));
+        return;
+    }
+
+    // Close ticket button
+    if (customId.startsWith('close_ticket_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const ticketId = customId.replace('close_ticket_', '');
+        try {
+            await ticketSystem.closeTicket(ticketId, interaction.user.id);
+            await interaction.editReply({ content: '✅ Ticket closed successfully.' });
+        } catch (error) {
+            logger.logError(error, { context: 'CLOSE_TICKET_BUTTON', userId: interaction.user.id });
+            await interaction.editReply({ content: '❌ An error occurred while closing the ticket.' });
+        }
+        return;
+    }
+
+    // Booster application buttons
+    if (customId.startsWith('approve_application_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const applicationId = customId.replace('approve_application_', '');
+        const result = await applicationSystem.approveApplication(applicationId, interaction.user.id);
+
+        if (result.success) {
+            await interaction.editReply({ content: '✅ Application approved successfully.' });
+            // Update the message
+            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+            embed.setColor(0x00FF00);
+            embed.addFields({ name: '✅ Status', value: 'Approved', inline: false });
+            await interaction.message.edit({ embeds: [embed], components: [] });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('reject_application_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const applicationId = customId.replace('reject_application_', '');
+        const result = await applicationSystem.rejectApplication(applicationId, interaction.user.id);
+
+        if (result.success) {
+            await interaction.editReply({ content: '✅ Application rejected.' });
+            // Update the message
+            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+            embed.setColor(0xFF0000);
+            embed.addFields({ name: '❌ Status', value: 'Rejected', inline: false });
+            await interaction.message.edit({ embeds: [embed], components: [] });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    // Event application button
+    if (customId.startsWith('event_apply_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const eventId = customId.replace('event_apply_', '');
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        if (!event || event.status !== 'open') {
+            await interaction.editReply({ content: '❌ This event is no longer open for applications.' });
+            return;
+        }
+        
+        // Get available characters for this booster
+        const availableChars = await characterSystem.getAvailableCharacters(
+            interaction.user.id,
+            event.min_item_level || 0,
+            event.min_rio_score || 0
+        );
+
+        if (availableChars.length === 0) {
+            await interaction.editReply({ content: '❌ You have no available characters. Please register characters using `/registerchar`.' });
+            return;
+        }
+
+        // Show character selection menu
+        const { StringSelectMenuBuilder } = require('discord.js');
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId(`event_char_select_${eventId}`)
+            .setPlaceholder('Select a character to apply with')
+            .addOptions(
+                availableChars.map(char => ({
+                    label: `${char.character_name}-${char.character_realm}`,
+                    description: `iLvl: ${char.item_level} | RIO: ${char.rio_score} | ${char.class_name}`,
+                    value: `${char.character_name}|${char.character_realm}`,
+                }))
+            );
+
+        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+        await interaction.editReply({ content: 'Select a character to apply with:', components: [actionRow], flags: MessageFlags.Ephemeral });
+        return;
+    }
+
+    // Select character for event (manager action)
+    if (customId.startsWith('select_char_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management', 'raid_leader'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        logger.logAction('ROSTER_SELECT_CLICKED', interaction.user.id, { customId, messageId: interaction.message.id });
+
+        // Format: select_char_${eventId}_${boosterId}_${charName}_${charRealm}
+        const parts = customId.replace('select_char_', '').split('_');
+        const eventId = parts[0];
+        const boosterId = parts[1];
+        const charName = parts.slice(2, -1).join('_'); // Handle names with underscores
+        const charRealm = parts[parts.length - 1];
+
+        const result = await calendarSystem.selectCharacterForEvent(eventId, boosterId, charName, charRealm, interaction.user.id);
+
+        if (result.success) {
+            await interaction.editReply({ content: '✅ Character selected for event.' });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    // Deselect character from event
+    if (customId.startsWith('deselect_char_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management', 'raid_leader'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        logger.logAction('ROSTER_DESELECT_CLICKED', interaction.user.id, { customId, messageId: interaction.message.id });
+
+        const parts = customId.replace('deselect_char_', '').split('_');
+        const eventId = parts[0];
+        const boosterId = parts[1];
+        const charName = parts.slice(2, -1).join('_');
+        const charRealm = parts[parts.length - 1];
+
+        const result = await calendarSystem.deselectCharacterFromEvent(eventId, boosterId, charName, charRealm, interaction.user.id);
+
+        if (result.success) {
+            const selectHandlers = require('./selectHandlers');
+            if (typeof selectHandlers.resetManagerCharacterSelectionMessage === 'function') {
+                await selectHandlers.resetManagerCharacterSelectionMessage(interaction.message, eventId, boosterId);
+            }
+            await interaction.editReply({ content: '✅ Character deselected from event.' });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    // End event button
+    if (customId.startsWith('end_event_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const eventId = customId.replace('end_event_', '');
+        const modal = createEndEventModal(eventId);
+        await interaction.showModal(modal);
+        return;
+    }
+
+    // Cancel event button
+    if (customId.startsWith('cancel_event_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const eventId = customId.replace('cancel_event_', '');
+        const result = await calendarSystem.cancelEvent(eventId, interaction.user.id);
+
+        if (result.success) {
+            await interaction.editReply({ content: `✅ ${result.message}` });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    // Complete payment button
+    if (customId.startsWith('complete_payment_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        // Parse: complete_payment_${payoutIdSafe}_${boosterId}
+        const customIdParts = customId.replace('complete_payment_', '');
+        const payoutPrefix = 'payout_';
+        if (!customIdParts.startsWith(payoutPrefix)) {
+            throw new Error('Invalid payout ID format');
+        }
+        const afterPrefix = customIdParts.substring(payoutPrefix.length);
+        const payoutIdSafe = afterPrefix.substring(0, 8);
+        const boosterId = afterPrefix.substring(9);
+
+        try {
+            // Update receipt status
+            await Database.run(
+                `UPDATE payout_receipts SET status = 'completed', completed_at = CURRENT_TIMESTAMP, completed_by = ? WHERE payout_id = ? AND booster_id = ?`,
+                [interaction.user.id, payoutIdSafe.replace(/_/g, '-'), boosterId]
+            );
+
+            // Update embed
+            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+            const fields = embed.data.fields || [];
+            const statusFieldIndex = fields.findIndex(field => field.name === '✅ Payment Status');
+            if (statusFieldIndex !== -1) {
+                fields[statusFieldIndex].value = '✅ Payment Completed';
+            } else {
+                embed.addFields({ name: '✅ Payment Status', value: '✅ Payment Completed', inline: false });
+            }
+            embed.setColor(0x00FF00);
+
+            // Remove the button
+            await interaction.message.edit({
+                embeds: [embed],
+                components: []
+            });
+
+            logger.logAction('PAYMENT_COMPLETED', interaction.user.id, {
+                payoutId: payoutIdSafe.replace(/_/g, '-'),
+                boosterId,
+                messageId: interaction.message.id
+            });
+
+            await interaction.editReply({ content: `✅ Payment for booster <@${boosterId}> marked as completed.` });
+        } catch (error) {
+            logger.logError(error, { context: 'COMPLETE_PAYMENT_BUTTON', userId: interaction.user.id });
+            await interaction.editReply({ content: `❌ Error marking payment as completed: ${error.message}` });
+        }
+        return;
+    }
+}
+
+module.exports = {
+    handleButton,
+};

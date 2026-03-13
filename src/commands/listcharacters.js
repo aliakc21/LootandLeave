@@ -1,0 +1,96 @@
+const { SlashCommandBuilder, MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const characterSystem = require('../systems/characterSystem');
+const Database = require('../database/database');
+const logger = require('../utils/logger');
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('listcharacters')
+        .setDescription('List your available characters for event application'),
+    async execute(interaction) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        try {
+            const event = await Database.get(
+                `SELECT * FROM events WHERE channel_id = ? AND status = 'open'`,
+                [interaction.channel.id]
+            );
+
+            if (!event) {
+                await interaction.editReply({ content: '❌ This command can only be used in an event channel.' });
+                return;
+            }
+
+            const registeredChars = await characterSystem.getBoosterCharacters(interaction.user.id);
+            if (registeredChars.length === 0) {
+                await interaction.editReply({ content: '❌ You have no registered characters. Please register characters using `/registerchar` first.' });
+                return;
+            }
+
+            await characterSystem.refreshBoosterCharacters(interaction.user.id);
+
+            const minItemLevel = event.min_item_level || 0;
+            const minRioScore = event.min_rio_score || 0;
+            const availableChars = await characterSystem.getAvailableCharacters(interaction.user.id, minItemLevel, minRioScore);
+
+            if (availableChars.length === 0) {
+                await interaction.editReply({
+                    content: `❌ None of your registered characters are eligible for **${event.name}** right now.\nRequirements: iLvl ${minItemLevel}+ and RIO ${minRioScore}+.\nRaid locks last until weekly reset. Mythic+ locks last 1 hour 30 minutes.`
+                });
+                return;
+            }
+
+            // Check if booster already has a character selected for this event
+            const selectedApp = await Database.get(
+                `SELECT * FROM event_applications WHERE event_id = ? AND booster_id = ? AND status = 'approved'`,
+                [event.event_id, interaction.user.id]
+            );
+
+            const embed = new EmbedBuilder()
+                .setTitle('📋 Your Available Characters')
+                .setDescription(`Event: **${event.name}**\nRequirements: **iLvl ${minItemLevel}+** | **RIO ${minRioScore}+**\n\nManagement will select the final roster character from the buttons below.`)
+                .setColor(0x5865F2)
+                .setTimestamp();
+
+            const components = [];
+            const selectionMenu = new StringSelectMenuBuilder()
+                .setCustomId(`manager_select_char_${event.event_id}_${interaction.user.id}`)
+                .setPlaceholder(selectedApp
+                    ? `Selected: ${selectedApp.character_name}-${selectedApp.character_realm}`
+                    : 'Management selects the roster character here')
+                .setDisabled(Boolean(selectedApp))
+                .addOptions(
+                    availableChars.slice(0, 25).map(char => ({
+                        label: `${char.character_name}-${char.character_realm}`.substring(0, 100),
+                        description: `iLvl: ${char.item_level} | RIO: ${char.rio_score} | ${char.class_name}`.substring(0, 100),
+                        value: `${char.character_name}|${char.character_realm}`,
+                    }))
+                );
+
+            components.push(new ActionRowBuilder().addComponents(selectionMenu));
+
+            // Add deselect button if character is selected
+            if (selectedApp) {
+                const deselectButton = new ButtonBuilder()
+                    .setCustomId(`deselect_char_${event.event_id}_${interaction.user.id}_${selectedApp.character_name}_${selectedApp.character_realm}`)
+                    .setLabel('Deselect Character')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('❌');
+
+                const deselectRow = new ActionRowBuilder().addComponents(deselectButton);
+                components.push(deselectRow);
+            }
+
+            // Send to channel (not ephemeral) so managers can see and select
+            await interaction.deleteReply();
+            await interaction.channel.send({ 
+                embeds: [embed],
+                content: `<@${interaction.user.id}> listed their available characters:`,
+                components: components.length > 0 ? components : undefined
+            });
+        } catch (error) {
+            logger.logError(error, { context: 'LIST_CHARACTERS_COMMAND', userId: interaction.user.id });
+            await interaction.editReply({ content: `❌ Error: ${error.message}` });
+        }
+    },
+};

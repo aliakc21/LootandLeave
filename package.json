@@ -1,0 +1,25 @@
+{
+  "name": "lootandleave-bot",
+  "version": "1.0.0",
+  "description": "Professional World of Warcraft boosting service Discord bot",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "keywords": ["discord", "bot", "wow", "boosting"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "axios": "^1.6.2",
+    "pg": "^8.13.3",
+    "xlsx": "^0.18.5",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

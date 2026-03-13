@@ -1,0 +1,393 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    LOOTANDLEAVE DISCORD BOT SİSTEMİ
+                         MÜŞTERİ KULLANIM KILAVUZU
+═══════════════════════════════════════════════════════════════════════════════
+
+Bu dokümantasyon, LootandLeave Discord bot sisteminin nasıl kullanılacağını 
+açıklamaktadır. Sistem tamamen Discord içi pencereler (Modals) ve butonlar 
+üzerinden çalışmaktadır. Herhangi bir web paneli bulunmamaktadır.
+
+═══════════════════════════════════════════════════════════════════════════════
+1. SİSTEM GENEL BAKIŞ
+═══════════════════════════════════════════════════════════════════════════════
+
+LootandLeave bot sistemi, World of Warcraft boosting hizmetlerinizi profesyonel
+bir şekilde yönetmek için tasarlanmıştır. Sistem aşağıdaki özelliklere sahiptir:
+
+✓ Manuel Rol Yönetimi (Otomatik rol verme YOK)
+✓ Kategori İzolasyonu (Client ve Booster birbirini göremez)
+✓ Ticket Sistemi (Her müşteri için özel kanal)
+✓ İş Yönetimi (Booster'lara iş gönderme)
+✓ Takvim/Roster Sistemi (Etkinlik yönetimi)
+✓ Otomatik Ödeme Sistemi (Altın dağıtımı)
+✓ Bakiye Takibi (Booster bakiyeleri)
+✓ Başvuru Sistemi (Yeni booster başvuruları)
+✓ Excel Export (Veri dışa aktarma)
+
+═══════════════════════════════════════════════════════════════════════════════
+2. İLK KURULUM VE YAPILANDIRMA
+═══════════════════════════════════════════════════════════════════════════════
+
+2.1. VDS KURULUMU
+─────────────────
+VDS (Sanal Sunucu) kurulumu tamamen sizin tarafınızdan yapılacaktır. 
+Geliştiriciye sadece kurulum için gerekli erişim bilgileri verilecektir.
+
+Gereksinimler:
+- Node.js 18 veya üzeri
+- En az 1GB RAM
+- 10GB disk alanı
+- 7/24 çalışabilir internet bağlantısı
+
+2.2. BOT KURULUMU
+─────────────────
+1. Proje dosyalarını VDS'e yükleyin
+2. Terminal'de proje klasörüne gidin
+3. "npm install" komutunu çalıştırın
+4. .env dosyasını düzenleyin (tüm ID'leri ve token'ları girin)
+5. "npm start" ile botu başlatın
+
+2.3. DISCORD YAPILANDIRMASI
+────────────────────────────
+Discord sunucunuzda şu yapıyı oluşturmanız gerekmektedir:
+
+KATEGORİLER:
+├── Bekleme Odası (Yeni gelenler için)
+├── Client Kategorisi (Sadece Client'lar görebilir)
+│   └── ticket-oluştur (Ticket butonu burada)
+└── Booster Kategorisi (Sadece Booster'lar görebilir)
+    ├── müsait-işler (İş ilanları burada)
+    └── başvuru (Booster başvuru butonu)
+
+ROLLER:
+- Admin (Tam yetki)
+- Management (Yönetim)
+- Advertiser (Reklamcı)
+- Client (Müşteri)
+- Booster (Boost yapanlar)
+- Raid Leader (Raid lideri)
+
+2.4. İLK KURULUM KOMUTU
+───────────────────────
+Discord'da "/setup" komutunu çalıştırın (Admin yetkisi gerekir).
+Bu komut:
+- Kategori izinlerini ayarlar
+- Ticket butonunu oluşturur
+- Booster başvuru butonunu oluşturur
+
+2.5. KOMUTLARI KAYDETME
+───────────────────────
+Discord'da "/deploy" komutunu çalıştırın veya terminal'de:
+"node deploy-commands.js" komutunu çalıştırın.
+
+═══════════════════════════════════════════════════════════════════════════════
+3. ROL YÖNETİMİ VE İZOLASYON
+═══════════════════════════════════════════════════════════════════════════════
+
+3.1. MANUEL ROL VERME
+─────────────────────
+ÖNEMLİ: Bot otomatik rol VERMEZ. Tüm roller manuel olarak verilmelidir.
+
+Yeni bir kişi Discord'a geldiğinde:
+1. Sadece "Bekleme Odası" kategorisini görür
+2. Admin, Management veya Advertiser rolüne sahip biri, o kişiye 
+   "Client" rolünü manuel olarak verir
+3. Client rolü verildikten sonra, kişi Client kategorisini görebilir
+
+Booster rolü verme:
+1. Booster başvurusu onaylandıktan sonra
+2. Management manuel olarak "Booster" rolünü verir
+3. Booster rolü verildikten sonra, kişi Booster kategorisini görebilir
+
+3.2. KATEGORİ İZOLASYONU
+────────────────────────
+Sistem otomatik olarak şu izolasyonu sağlar:
+
+✓ Client'lar:
+  - Sadece Client kategorisini görür
+  - Diğer Client'ları GÖREMEZ
+  - Booster'ları GÖREMEZ
+
+✓ Booster'lar:
+  - Sadece Booster kategorisini görür
+  - Client kategorisini GÖREMEZ
+  - Diğer Booster'ları görebilir (işbirliği için)
+
+✓ Admin, Management, Advertiser:
+  - TÜM kategorileri görür
+  - Tam erişim yetkisi
+
+═══════════════════════════════════════════════════════════════════════════════
+4. TICKET SİSTEMİ
+═══════════════════════════════════════════════════════════════════════════════
+
+4.1. TICKET OLUŞTURMA
+──────────────────────
+1. Client kategorisindeki "ticket-oluştur" kanalına gidin
+2. "🎫 Ticket Oluştur" butonuna tıklayın
+3. Size özel bir gizli kanal açılır
+4. Bot otomatik olarak şu mesajı gönderir:
+   "Talebiniz alınmıştır, şu an bir yetkiliye yönlendiriliyorsunuz. 
+   Lütfen bekleyiniz."
+
+4.2. TICKET YÖNETİMİ
+────────────────────
+- Her ticket için özel bir kanal oluşturulur
+- Sadece ticket sahibi ve yetkililer bu kanalı görebilir
+- Müşteri talebini yazar, yetkililer yanıtlar
+- Ticket kapatıldığında kanal 5 saniye sonra otomatik silinir
+
+═══════════════════════════════════════════════════════════════════════════════
+5. İŞ YÖNETİMİ
+═══════════════════════════════════════════════════════════════════════════════
+
+5.1. İŞ GÖNDERME
+────────────────
+Müşteri ile anlaşıldıktan sonra:
+
+1. Ticket kanalında "/postjob" komutunu kullanın
+2. Ticket ID'yi girin (ticket-xxxxx formatında)
+3. İş açıklamasını yazın
+4. Bot otomatik olarak işi "müsait-işler" kanalına gönderir
+
+5.2. İŞ TAKİBİ
+──────────────
+- Her iş için benzersiz bir Job ID oluşturulur
+- İş durumu veritabanında takip edilir
+- İş tamamlandığında "/payout" komutu ile ödeme yapılır
+
+═══════════════════════════════════════════════════════════════════════════════
+6. TAKVİM VE ROSTER SİSTEMİ
+═══════════════════════════════════════════════════════════════════════════════
+
+6.1. ETKİNLİK OLUŞTURMA
+────────────────────────
+1. "/createevent" komutunu kullanın
+2. Etkinlik adını girin (örn: "Mythic+ 20+ Run")
+3. Tarih girin (YYYY-MM-DD HH:MM formatında)
+4. Açıklama ekleyin (opsiyonel)
+5. Bot kanala butonlu bir embed mesaj gönderir
+
+6.2. BOOSTER BAŞVURUSU
+──────────────────────
+1. Booster, etkinlik mesajındaki "Başvur" butonuna tıklar
+2. Açılan formda:
+   - Karakter adını girer
+   - Realm'i girer
+3. Başvuru "Bekleyenler" listesine eklenir
+
+6.3. RAID LEADER ONAYI
+──────────────────────
+1. Raid Leader, etkinlik mesajını görür
+2. Bekleyen başvuruları inceler
+3. Uygun gördüklerini onaylar
+4. Onaylananlar "Onaylanan Kadro" listesine geçer
+5. Roster otomatik olarak güncellenir
+
+═══════════════════════════════════════════════════════════════════════════════
+7. ÖDEME SİSTEMİ (PAYOUT)
+═══════════════════════════════════════════════════════════════════════════════
+
+7.1. ÖDEME İŞLEME
+──────────────────
+İş veya etkinlik tamamlandığında:
+
+1. "/payout" komutunu kullanın
+2. Toplam altın miktarını girin (örn: 60000)
+3. Katılan booster ID'lerini girin (virgülle ayrılmış veya mention)
+4. Event ID veya Job ID ekleyin (opsiyonel)
+
+Örnek: /payout 60000 @booster1 @booster2 @booster3
+
+7.2. OTOMATIK HESAPLAMA
+────────────────────────
+Bot otomatik olarak altını şu şekilde böler:
+
+- Kasa: %30
+- Reklamcı: %20
+- Booster Toplam: %50 (katılanlar arasında eşit bölünür)
+
+Örnek: 100,000g toplam
+- Kasa: 30,000g
+- Reklamcı: 20,000g
+- Booster Toplam: 50,000g
+- 3 booster varsa, her biri: 16,666g
+
+7.3. ÖDEME BİLGİ KARTI
+──────────────────────
+Bot, ödeme yapıldığında kanala şeffaf bir bilgi kartı gönderir:
+- Toplam altın
+- Kasa payı
+- Reklamcı payı
+- Booster toplam payı
+- Booster başına pay
+- Katılan booster'lar listesi
+- Payout ID
+
+7.4. BAKİYE SORGULAMA
+──────────────────────
+Booster'lar "/bank" komutunu kullanarak:
+- Mevcut bakiyelerini görebilir
+- Sadece kendileri görebilir (ephemeral mesaj)
+- Haftalık birikmiş altın miktarını görür
+
+═══════════════════════════════════════════════════════════════════════════════
+8. BOOSTER BAŞVURU SİSTEMİ
+═══════════════════════════════════════════════════════════════════════════════
+
+8.1. BAŞVURU YAPMA
+──────────────────
+1. Booster kategorisindeki "başvuru" kanalına gidin
+2. "🎮 Başvur" butonuna tıklayın
+3. Açılan formda:
+   - Karakter adını girin
+   - Realm'i girin
+   - Tecrübenizi yazın (opsiyonel)
+
+8.2. OTOMATIK API DOĞRULAMA
+────────────────────────────
+Bot otomatik olarak:
+- Raider.IO API'den karakter verilerini çeker
+- RIO skorunu alır
+- Item level'ı alır
+- Progression bilgisini alır
+- Tüm bilgileri birleştirir
+
+8.3. YÖNETİM ONAYI
+──────────────────
+1. Başvuru "#başvurular" kanalına (yönetim kanalı) düşer
+2. Embed mesajda tüm bilgiler görünür:
+   - Başvuran kişi
+   - Karakter bilgileri
+   - API'den çekilen veriler (RIO, item level, progression)
+3. Yönetim "Onayla" veya "Reddet" butonuna tıklar
+4. Onaylandığında, karakter veritabanına kaydedilir
+5. Management manuel olarak "Booster" rolünü verir
+
+═══════════════════════════════════════════════════════════════════════════════
+9. EXCEL EXPORT
+═══════════════════════════════════════════════════════════════════════════════
+
+9.1. MANUEL EXPORT
+──────────────────
+1. "/export" komutunu kullanın (Management yetkisi gerekir)
+2. Bot tüm verileri Excel formatında dışa aktarır
+3. Dosya "exports" klasörüne kaydedilir
+4. Timestamp'li dosya adı: lootandleave_export_YYYY-MM-DD_HH-MM.xlsx
+
+9.2. OTOMATIK EXPORT
+─────────────────────
+- Sistem her Pazar gece yarısı otomatik export yapar
+- Tüm tablolar ayrı sheet'lerde export edilir:
+  * Tickets
+  * Jobs
+  * Events
+  * Event Applications
+  * Payouts
+  * Payout Details
+  * Booster Balances
+  * Booster Applications
+  * Characters
+
+9.3. EXPORT İÇERİĞİ
+────────────────────
+Her export dosyası şu bilgileri içerir:
+- Tüm ticket kayıtları
+- Tüm iş kayıtları
+- Tüm etkinlik kayıtları
+- Tüm başvurular
+- Tüm ödemeler ve detayları
+- Tüm booster bakiyeleri
+- Tüm karakter kayıtları
+
+═══════════════════════════════════════════════════════════════════════════════
+10. KOMUT LİSTESİ
+═══════════════════════════════════════════════════════════════════════════════
+
+YÖNETİM KOMUTLARI:
+──────────────────
+/setup                    - Sunucu kurulumu (Admin)
+/deploy                   - Komutları kaydet (Admin)
+/postjob                  - İş gönder (Management/Advertiser)
+/createevent              - Etkinlik oluştur (Management)
+/payout                   - Ödeme işle (Management)
+/export                   - Excel export (Management)
+
+KULLANICI KOMUTLARI:
+────────────────────
+/bank                     - Bakiye sorgula (Booster)
+
+═══════════════════════════════════════════════════════════════════════════════
+11. GÜVENLİK VE GİZLİLİK
+═══════════════════════════════════════════════════════════════════════════════
+
+11.1. MÜŞTERİ GİZLİLİĞİ
+────────────────────────
+✓ Client'lar birbirini göremez
+✓ Client'lar Booster'ları göremez
+✓ Her ticket özel ve gizlidir
+✓ Sadece yetkililer tüm bilgilere erişebilir
+
+11.2. ROL YÖNETİMİ
+──────────────────
+✓ Bot otomatik rol VERMEZ
+✓ Tüm roller manuel verilir
+✓ İpler tamamen yönetimin elinde
+
+11.3. VERİ GÜVENLİĞİ
+────────────────────
+✓ Tüm veriler VDS'inizde saklanır
+✓ Database dosyası sadece sizde
+✓ Excel export'lar sadece sizde
+✓ %100 kontrol sizde
+
+═══════════════════════════════════════════════════════════════════════════════
+12. SORUN GİDERME
+═══════════════════════════════════════════════════════════════════════════════
+
+12.1. BOT ÇALIŞMIYOR
+─────────────────────
+- VDS'de bot çalışıyor mu kontrol edin
+- "npm start" komutu ile başlatın
+- Console log'larını kontrol edin
+- .env dosyasını kontrol edin
+
+12.2. KOMUTLAR GÖRÜNMÜYOR
+─────────────────────────
+- "/deploy" komutunu çalıştırın
+- Veya "node deploy-commands.js" çalıştırın
+- Bot token'ını kontrol edin
+
+12.3. İZOLASYON ÇALIŞMIYOR
+──────────────────────────
+- "/setup" komutunu tekrar çalıştırın
+- Kategori ID'lerini .env'de kontrol edin
+- Rol ID'lerini .env'de kontrol edin
+
+12.4. API HATALARI
+──────────────────
+- Raider.IO API key'ini kontrol edin
+- İnternet bağlantısını kontrol edin
+- API rate limit'ini kontrol edin
+
+═══════════════════════════════════════════════════════════════════════════════
+13. DESTEK VE İLETİŞİM
+═══════════════════════════════════════════════════════════════════════════════
+
+Teknik sorunlar için geliştirici ile iletişime geçin.
+Operasyonel sorunlar için yönetim ekibi ile iletişime geçin.
+
+═══════════════════════════════════════════════════════════════════════════════
+14. ÖNEMLİ NOTLAR
+═══════════════════════════════════════════════════════════════════════════════
+
+✓ Bot tamamen modüler yapıdadır, yeni özellikler eklenebilir
+✓ Tüm veriler PostgreSQL veritabanında saklanır
+✓ Excel export'lar düzenli olarak yedek alınmalıdır
+✓ VDS erişim bilgilerini güvende tutun
+✓ Bot token'ını asla paylaşmayın
+✓ .env dosyasını asla paylaşmayın
+
+═══════════════════════════════════════════════════════════════════════════════
+                            SON GÜNCELLEME: 2024
+═══════════════════════════════════════════════════════════════════════════════

@@ -19,6 +19,14 @@ function getTicketRequestSummary(ticket) {
     }
 
     if (ticket.boost_type === 'mythic_plus') {
+        const runs = getMythicRuns(ticket);
+        if (runs.length === 1) {
+            return `Mythic+ - ${runs[0].label} +${runs[0].keyLevel}`;
+        }
+        if (runs.length > 1) {
+            return `Mythic+ - ${runs.length} custom runs`;
+        }
+
         const level = ticket.boost_key_level ? `+${ticket.boost_key_level}` : 'Unknown level';
         const amount = ticket.boost_amount || 1;
         return `Mythic+ - ${ticket.boost_label || 'Unknown dungeon'} ${level} x${amount}`;
@@ -63,6 +71,19 @@ function getTicketRequestFields(ticket) {
     }
 
     if (ticket.boost_type === 'mythic_plus') {
+        const runs = getMythicRuns(ticket);
+        if (runs.length > 0) {
+            return [
+                { name: '🎯 Boost Type', value: 'Mythic+', inline: true },
+                { name: '🔢 Total Runs', value: String(runs.length), inline: true },
+                {
+                    name: '🗺️ Requested Runs',
+                    value: runs.map((run, index) => `${index + 1}. ${run.label} +${run.keyLevel}`).join('\n').slice(0, 1024),
+                    inline: false
+                }
+            ];
+        }
+
         return [
             { name: '🎯 Boost Type', value: 'Mythic+', inline: true },
             { name: '🗺️ Dungeon', value: ticket.boost_label || 'Unknown dungeon', inline: true },
@@ -92,6 +113,21 @@ function getTicketRequestFields(ticket) {
     }
 
     return [];
+}
+
+function getMythicRuns(ticket) {
+    if (!ticket?.boost_runs) {
+        return [];
+    }
+
+    try {
+        const runs = typeof ticket.boost_runs === 'string'
+            ? JSON.parse(ticket.boost_runs)
+            : ticket.boost_runs;
+        return Array.isArray(runs) ? runs : [];
+    } catch {
+        return [];
+    }
 }
 
 function getTicketApprovalFields(ticket) {
@@ -244,8 +280,8 @@ async function createTicket(clientId, guild, requestData = {}) {
 
         // Save ticket to database
         await Database.run(
-            `INSERT INTO tickets (ticket_id, client_id, channel_id, boost_type, event_id, boost_label, requested_class, requested_role, boost_key_level, boost_amount, boost_scheduled_date, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO tickets (ticket_id, client_id, channel_id, boost_type, event_id, boost_label, boost_runs, requested_class, requested_role, boost_key_level, boost_amount, boost_scheduled_date, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 ticketId,
                 clientId,
@@ -253,6 +289,7 @@ async function createTicket(clientId, guild, requestData = {}) {
                 requestData.boost_type || null,
                 requestData.event_id || null,
                 requestData.boost_label || null,
+                requestData.boost_runs || null,
                 requestData.requested_class || null,
                 requestData.requested_role || null,
                 requestData.boost_key_level || null,
@@ -338,4 +375,5 @@ module.exports = {
     getTicketRequestSummary,
     getTicketApprovalFields,
     buildTicketActionRows,
+    getMythicRuns,
 };

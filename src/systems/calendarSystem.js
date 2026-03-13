@@ -7,6 +7,7 @@ const payoutSystem = require('./payoutSystem');
 const logChannelSystem = require('./logChannelSystem');
 const config = require('../utils/config');
 const { getRaidImageUrl, getDungeonImageUrl } = require('../utils/mediaCatalog');
+const ticketSystem = require('./ticketSystem');
 
 let client = null;
 
@@ -389,7 +390,12 @@ async function approveMythicTicket(ticketId, approvedBy, settledGold, guild) {
             return { success: false, message: 'Ticket is already approved.' };
         }
 
-        const eventName = `${ticket.boost_label} +${ticket.boost_key_level} x${ticket.boost_amount || 1}`;
+        const runs = ticketSystem.getMythicRuns(ticket);
+        const eventName = runs.length === 1
+            ? `${runs[0].label} +${runs[0].keyLevel}`
+            : runs.length > 1
+                ? `M+ Order x${runs.length}`
+                : `${ticket.boost_label} +${ticket.boost_key_level} x${ticket.boost_amount || 1}`;
         const scheduledDate = new Date();
         const eventResult = await createEvent(
             eventName,

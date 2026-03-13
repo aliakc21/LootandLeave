@@ -1,4 +1,4 @@
-const { MessageFlags } = require('discord.js');
+const { MessageFlags, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
 const calendarSystem = require('./calendarSystem');
 const applicationSystem = require('./applicationSystem');
 const characterSystem = require('./characterSystem');
@@ -7,6 +7,21 @@ const logger = require('../utils/logger');
 const { EmbedBuilder } = require('discord.js');
 const { buildRaidEventName } = require('../utils/contentCatalog');
 const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
+const mplusRequestStore = require('../utils/mplusRequestStore');
+
+function buildMythicDungeonSelect(sessionId, runNumber) {
+    const dungeonSelectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`ticket_mythic_dungeon_select:${sessionId}:${runNumber}`)
+        .setPlaceholder(`Choose the dungeon for run ${runNumber}`)
+        .addOptions(
+            MIDNIGHT_DUNGEONS.map(dungeon => ({
+                label: dungeon.label,
+                value: dungeon.id,
+            }))
+        );
+
+    return new ActionRowBuilder().addComponents(dungeonSelectMenu);
+}
 
 async function handleModal(interaction) {
     const { customId } = interaction;
@@ -29,19 +44,41 @@ async function handleModal(interaction) {
         return;
     }
 
-    if (customId.startsWith('mythic_plus_ticket_modal:')) {
+    if (customId === 'mythic_plus_amount_modal') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const dungeonId = customId.split(':')[1];
+        const runCountInput = interaction.fields.getTextInputValue('run_count').trim();
+        const runCount = parseInt(runCountInput, 10);
+        if (Number.isNaN(runCount) || runCount <= 0 || runCount > 8) {
+            await interaction.editReply({ content: '❌ Amount of runs must be a number between 1 and 8.' });
+            return;
+        }
+
+        const session = mplusRequestStore.createSession(interaction.user.id, interaction.guild.id, runCount);
+        await interaction.editReply({
+            content: `Choose the dungeon for run 1 of ${runCount}:`,
+            components: [buildMythicDungeonSelect(session.sessionId, 1)]
+        });
+        return;
+    }
+
+    if (customId.startsWith('mythic_plus_run_modal:')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const [, sessionId, runNumberInput, dungeonId] = customId.split(':');
+        const runNumber = parseInt(runNumberInput, 10);
+        const session = mplusRequestStore.getSession(sessionId);
         const dungeon = MIDNIGHT_DUNGEONS.find(entry => entry.id === dungeonId);
         const keyLevelInput = interaction.fields.getTextInputValue('key_level').trim();
-        const amountInput = interaction.fields.getTextInputValue('amount').trim();
-
         const keyLevel = parseInt(keyLevelInput, 10);
-        const amount = parseInt(amountInput, 10);
 
-        if (!dungeon) {
-            await interaction.editReply({ content: '❌ Invalid dungeon selection.' });
+        if (!session || session.userId !== interaction.user.id || session.guildId !== interaction.guild.id) {
+            await interaction.editReply({ content: '❌ This Mythic+ request session has expired. Please start again.' });
+            return;
+        }
+
+        if (!dungeon || Number.isNaN(runNumber) || session.runs.length + 1 !== runNumber) {
+            await interaction.editReply({ content: '❌ Invalid Mythic+ run step. Please start again.' });
             return;
         }
 
@@ -50,22 +87,37 @@ async function handleModal(interaction) {
             return;
         }
 
-        if (Number.isNaN(amount) || amount <= 0) {
-            await interaction.editReply({ content: '❌ Amount of runs must be a positive number.' });
-            return;
-        }
+        mplusRequestStore.addRun(sessionId, {
+            dungeonId,
+            label: dungeon.label,
+            keyLevel,
+        });
 
         try {
-            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
-                boost_type: 'mythic_plus',
-                boost_label: dungeon.label,
-                boost_key_level: keyLevel,
-                boost_amount: amount,
-            });
+            const updatedSession = mplusRequestStore.getSession(sessionId);
+            if (updatedSession.runs.length < updatedSession.runCount) {
+                const nextRun = updatedSession.runs.length + 1;
+                await interaction.editReply({
+                    content: `Saved run ${runNumber}/${updatedSession.runCount}: **${dungeon.label} +${keyLevel}**\nChoose the dungeon for run ${nextRun}:`,
+                    components: [buildMythicDungeonSelect(sessionId, nextRun)]
+                });
+                return;
+            }
 
+            const requestData = {
+                boost_type: 'mythic_plus',
+                boost_label: updatedSession.runCount === 1 ? updatedSession.runs[0].label : `${updatedSession.runCount} Mythic+ Runs`,
+                boost_key_level: updatedSession.runCount === 1 ? updatedSession.runs[0].keyLevel : null,
+                boost_amount: updatedSession.runCount,
+                boost_runs: JSON.stringify(updatedSession.runs),
+            };
+
+            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, requestData);
+            mplusRequestStore.clearSession(sessionId);
             await interaction.editReply({ content: `✅ Ticket created for Mythic+ request! ${result.channel}` });
         } catch (error) {
             logger.logError(error, { context: 'MYTHIC_PLUS_TICKET_MODAL', userId: interaction.user.id });
+            mplusRequestStore.clearSession(sessionId);
             await interaction.editReply({ content: '❌ An error occurred while creating your Mythic+ ticket.' });
         }
         return;

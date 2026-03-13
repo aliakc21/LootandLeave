@@ -2,6 +2,29 @@ const Database = require('../database/database');
 const { fetchCharacterData } = require('../utils/wowApi');
 const logger = require('../utils/logger');
 
+function getCharacterRefreshIntervalMinutes() {
+    const parsed = parseInt(process.env.CHARACTER_REFRESH_INTERVAL_MINUTES || '60', 10);
+    return Number.isNaN(parsed) || parsed <= 0 ? 60 : parsed;
+}
+
+function getCharacterRefreshBatchSize() {
+    const parsed = parseInt(process.env.CHARACTER_REFRESH_BATCH_SIZE || '25', 10);
+    return Number.isNaN(parsed) || parsed <= 0 ? 25 : parsed;
+}
+
+function isCharacterStale(lastUpdated, maxAgeMinutes = getCharacterRefreshIntervalMinutes()) {
+    if (!lastUpdated) {
+        return true;
+    }
+
+    const updatedAt = new Date(lastUpdated);
+    if (Number.isNaN(updatedAt.getTime())) {
+        return true;
+    }
+
+    return Date.now() - updatedAt.getTime() > maxAgeMinutes * 60 * 1000;
+}
+
 // Register a character for a booster
 async function registerCharacter(boosterId, characterName, characterRealm) {
     try {
@@ -49,6 +72,71 @@ async function registerCharacter(boosterId, characterName, characterRealm) {
     }
 }
 
+function parseBulkCharacterEntries(rawInput) {
+    return rawInput
+        .split(/\r?\n|,/)
+        .map(entry => entry.trim())
+        .filter(Boolean)
+        .map(entry => {
+            const separatorIndex = entry.indexOf('-');
+            if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+                return { raw: entry, valid: false };
+            }
+
+            return {
+                raw: entry,
+                valid: true,
+                characterName: entry.slice(0, separatorIndex).trim(),
+                characterRealm: entry.slice(separatorIndex + 1).trim(),
+            };
+        });
+}
+
+async function registerMultipleCharacters(boosterId, rawInput) {
+    try {
+        const parsedEntries = parseBulkCharacterEntries(rawInput);
+        const validEntries = parsedEntries.filter(entry => entry.valid);
+        const invalidEntries = parsedEntries.filter(entry => !entry.valid).map(entry => entry.raw);
+
+        if (validEntries.length === 0) {
+            return {
+                success: false,
+                message: 'No valid characters found. Use the format `Character-Realm`, separated by commas or new lines.',
+            };
+        }
+
+        const uniqueEntries = [];
+        const seen = new Set();
+        for (const entry of validEntries.slice(0, 20)) {
+            const key = `${entry.characterName.toLowerCase()}|${entry.characterRealm.toLowerCase()}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueEntries.push(entry);
+            }
+        }
+
+        const successes = [];
+        const failures = [];
+        for (const entry of uniqueEntries) {
+            const result = await registerCharacter(boosterId, entry.characterName, entry.characterRealm);
+            if (result.success) {
+                successes.push(`${entry.characterName}-${entry.characterRealm}`);
+            } else {
+                failures.push(`${entry.characterName}-${entry.characterRealm}: ${result.message}`);
+            }
+        }
+
+        return {
+            success: successes.length > 0,
+            successes,
+            failures: [...failures, ...invalidEntries.map(entry => `${entry}: invalid format`)],
+        };
+    } catch (error) {
+        logger.logError(error, { context: 'REGISTER_MULTIPLE_CHARACTERS', boosterId });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
 // Get all characters for a booster
 async function getBoosterCharacters(boosterId) {
     try {
@@ -65,20 +153,75 @@ async function getBoosterCharacters(boosterId) {
 
 // Refresh all registered characters for a booster from Raider.IO
 async function refreshBoosterCharacters(boosterId) {
+    return ensureBoosterCharactersFresh(boosterId, { force: true });
+}
+
+async function ensureBoosterCharactersFresh(boosterId, options = {}) {
     try {
         const characters = await getBoosterCharacters(boosterId);
-        let refreshedCount = 0;
+        const maxAgeMinutes = options.maxAgeMinutes || getCharacterRefreshIntervalMinutes();
+        const force = Boolean(options.force);
+        const limit = options.limit || null;
+        const candidates = (force ? characters : characters.filter(char => isCharacterStale(char.last_updated, maxAgeMinutes)))
+            .sort((a, b) => new Date(a.last_updated || 0).getTime() - new Date(b.last_updated || 0).getTime());
 
-        for (const char of characters) {
+        const selectedCharacters = typeof limit === 'number' ? candidates.slice(0, limit) : candidates;
+        let refreshedCount = 0;
+        let failedCount = 0;
+
+        for (const char of selectedCharacters) {
             const result = await refreshCharacter(boosterId, char.character_name, char.character_realm);
             if (result.success) {
                 refreshedCount++;
+            } else {
+                failedCount++;
             }
         }
 
-        return { success: true, refreshedCount, total: characters.length };
+        return {
+            success: true,
+            refreshedCount,
+            failedCount,
+            total: characters.length,
+            checked: selectedCharacters.length,
+        };
     } catch (error) {
         logger.logError(error, { context: 'REFRESH_BOOSTER_CHARACTERS', boosterId });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
+async function refreshStaleCharactersBatch(limit = getCharacterRefreshBatchSize()) {
+    try {
+        const refreshThreshold = new Date(Date.now() - getCharacterRefreshIntervalMinutes() * 60 * 1000).toISOString();
+        const staleCharacters = await Database.all(
+            `SELECT booster_id, character_name, character_realm, last_updated
+             FROM characters
+             WHERE last_updated IS NULL OR last_updated < ?
+             ORDER BY last_updated ASC NULLS FIRST
+             LIMIT ?`,
+            [refreshThreshold, limit]
+        );
+
+        let refreshedCount = 0;
+        let failedCount = 0;
+        for (const character of staleCharacters) {
+            const result = await refreshCharacter(character.booster_id, character.character_name, character.character_realm);
+            if (result.success) {
+                refreshedCount++;
+            } else {
+                failedCount++;
+            }
+        }
+
+        return {
+            success: true,
+            checked: staleCharacters.length,
+            refreshedCount,
+            failedCount,
+        };
+    } catch (error) {
+        logger.logError(error, { context: 'REFRESH_STALE_CHARACTERS_BATCH' });
         return { success: false, message: `Error: ${error.message}` };
     }
 }
@@ -212,13 +355,17 @@ async function refreshCharacter(boosterId, characterName, characterRealm) {
 
 module.exports = {
     registerCharacter,
+    ensureBoosterCharactersFresh,
     getBoosterCharacters,
     refreshBoosterCharacters,
+    refreshStaleCharactersBatch,
     getAvailableCharacters,
     lockCharacter,
     unlockCharacter,
     refreshCharacter,
     cleanupExpiredLocks,
     getNextWednesday,
-    getMythicPlusLockUntil
+    getMythicPlusLockUntil,
+    registerMultipleCharacters,
+    getCharacterRefreshIntervalMinutes,
 };

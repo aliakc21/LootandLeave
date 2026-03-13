@@ -8,6 +8,7 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 - **Ticket System**: Private ticket channels for each client
 - **Event Management**: Calendar system with weekday categories and automatic channel creation
 - **Character Management**: Raider.IO integration for character data fetching and filtering
+- **Automatic Character Refresh**: Stale registered characters are refreshed from Raider.IO automatically
 - **Weekly Character Locks**: Automatic character locking until weekly reset
 - **Automated Payouts**: Commission-based gold distribution system
 - **Booster Applications**: Automated application system with Raider.IO verification
@@ -53,6 +54,8 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 - `DISCORD_GUILD_ID`: Your Discord server (guild) ID
 - `DATABASE_URL`: PostgreSQL connection string
 - `DATABASE_SSL`: Set to `true` for Railway hosted Postgres, `false` for most local PostgreSQL installs
+- `CHARACTER_REFRESH_INTERVAL_MINUTES`: How old a character can be before it is refreshed automatically
+- `CHARACTER_REFRESH_BATCH_SIZE`: Hourly background refresh batch size
 - `CHANNEL_CLIENT_CATEGORY`: Category ID for client channels
 - `CHANNEL_BOOSTER_CATEGORY`: Category ID for booster channels
 - `CHANNEL_APPLICATIONS`: Channel ID for booster applications
@@ -91,8 +94,9 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 
 ### Character Commands
 - `/registerchar` - Register a WoW character
+- `/registerchars` - Register multiple WoW characters at once using `Character-Realm` entries
 - `/mychars` - View your registered characters
-- `/refreshchars` - Refresh character data from Raider.IO
+- `/refreshchars` - Refresh one character or all registered characters from Raider.IO
 
 ### Management Commands
 - `/payout` - Process a payout for completed job/event

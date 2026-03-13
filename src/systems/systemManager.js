@@ -32,6 +32,14 @@ function initializeSystems(client) {
         await calendarSystem.autoEndEvents();
     });
 
+    // Refresh stale character data from Raider.IO every hour in small batches.
+    cron.schedule('15 * * * *', async () => {
+        const result = await characterSystem.refreshStaleCharactersBatch();
+        if (result.success && result.checked > 0) {
+            logger.logInfo(`Scheduled character refresh executed: ${result.refreshedCount}/${result.checked} refreshed, ${result.failedCount} failed.`);
+        }
+    });
+
     logger.logInfo('All systems initialized');
 }
 

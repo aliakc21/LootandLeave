@@ -10,12 +10,15 @@ module.exports = {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {
-            const characters = await characterSystem.getBoosterCharacters(interaction.user.id);
+            const initialCharacters = await characterSystem.getBoosterCharacters(interaction.user.id);
 
-            if (characters.length === 0) {
+            if (initialCharacters.length === 0) {
                 await interaction.editReply({ content: '❌ You have no registered characters. Use `/registerchar` to register one.' });
                 return;
             }
+
+            const refreshResult = await characterSystem.ensureBoosterCharactersFresh(interaction.user.id);
+            const characters = await characterSystem.getBoosterCharacters(interaction.user.id);
 
             const embed = new EmbedBuilder()
                 .setTitle('📋 Your Registered Characters')
@@ -27,6 +30,9 @@ module.exports = {
             ).join('\n\n');
 
             embed.setDescription(charList);
+            if (refreshResult.success && refreshResult.refreshedCount > 0) {
+                embed.setFooter({ text: `Updated ${refreshResult.refreshedCount} stale character(s) from Raider.IO before showing this list.` });
+            }
 
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {

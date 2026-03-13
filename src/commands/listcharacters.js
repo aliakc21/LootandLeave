@@ -27,7 +27,7 @@ module.exports = {
                 return;
             }
 
-            await characterSystem.refreshBoosterCharacters(interaction.user.id);
+            await characterSystem.ensureBoosterCharactersFresh(interaction.user.id);
 
             const minItemLevel = event.min_item_level || 0;
             const minRioScore = event.min_rio_score || 0;

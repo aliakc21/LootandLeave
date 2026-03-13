@@ -61,7 +61,7 @@ async function handleButton(interaction) {
                 },
                 {
                     label: 'Mythic+',
-                    description: 'Request a dungeon, key level, and amount of runs',
+                    description: 'Set the run count, then choose each dungeon and key level',
                     value: 'mythic_plus',
                 },
                 {

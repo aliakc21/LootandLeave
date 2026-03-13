@@ -146,20 +146,8 @@ async function handleSelect(interaction) {
         }
 
         if (selectedType === 'mythic_plus') {
-            const dungeonSelectMenu = new StringSelectMenuBuilder()
-                .setCustomId('ticket_mythic_dungeon_select')
-                .setPlaceholder('Choose a Midnight dungeon')
-                .addOptions(
-                    MIDNIGHT_DUNGEONS.map(dungeon => ({
-                        label: dungeon.label,
-                        value: dungeon.id,
-                    }))
-                );
-
-            await interaction.update({
-                content: 'Choose the Mythic+ dungeon you want:',
-                components: [new ActionRowBuilder().addComponents(dungeonSelectMenu)]
-            });
+            const createMythicPlusAmountModal = require('../modals/mythicPlusAmountModal');
+            await interaction.showModal(createMythicPlusAmountModal());
             return;
         }
 
@@ -176,17 +164,26 @@ async function handleSelect(interaction) {
         }
     }
 
-    if (customId === 'ticket_mythic_dungeon_select') {
+    if (customId.startsWith('ticket_mythic_dungeon_select:')) {
+        const [, sessionId, runNumberValue] = customId.split(':');
+        const runNumber = parseInt(runNumberValue, 10);
+        const mplusRequestStore = require('../utils/mplusRequestStore');
+        const session = mplusRequestStore.getSession(sessionId);
         const dungeonId = interaction.values[0];
         const dungeon = MIDNIGHT_DUNGEONS.find(entry => entry.id === dungeonId);
 
-        if (!dungeon) {
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.reply({ content: '❌ This Mythic+ request session has expired. Please start again.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (!dungeon || Number.isNaN(runNumber) || session.runs.length + 1 !== runNumber) {
             await interaction.reply({ content: '❌ Invalid dungeon selection.', flags: MessageFlags.Ephemeral });
             return;
         }
 
         const createMythicPlusTicketModal = require('../modals/mythicPlusTicketModal');
-        await interaction.showModal(createMythicPlusTicketModal(dungeon.id, dungeon.label));
+        await interaction.showModal(createMythicPlusTicketModal(sessionId, runNumber, dungeon.id, dungeon.label));
         return;
     }
 

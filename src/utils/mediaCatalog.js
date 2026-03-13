@@ -20,6 +20,8 @@ function getBoostImageUrl(request) {
         return null;
     }
 
+    const mythicRuns = parseMythicRuns(request);
+
     if (request.boost_type === 'raid') {
         return getRaidImageUrl(request.boost_label);
     }
@@ -29,10 +31,28 @@ function getBoostImageUrl(request) {
     }
 
     if (request.boost_type === 'mythic_plus') {
+        if (mythicRuns.length > 0) {
+            return getDungeonImageUrl(mythicRuns[0].label, mythicRuns[0].keyLevel);
+        }
         return getDungeonImageUrl(request.boost_label, request.boost_key_level);
     }
 
     return null;
+}
+
+function parseMythicRuns(request) {
+    if (!request?.boost_runs) {
+        return [];
+    }
+
+    try {
+        const runs = typeof request.boost_runs === 'string'
+            ? JSON.parse(request.boost_runs)
+            : request.boost_runs;
+        return Array.isArray(runs) ? runs : [];
+    } catch {
+        return [];
+    }
 }
 
 module.exports = {

@@ -108,7 +108,7 @@ async function getOrCreateLogChannel(guild, channelName, channelType) {
 }
 
 // Log event (ended or cancelled)
-async function logEvent(event, action, actionBy) {
+async function logEvent(event, action, actionBy, options = {}) {
     try {
         // Get guild from event channel if available, otherwise use env
         let guild;
@@ -184,7 +184,47 @@ async function logEvent(event, action, actionBy) {
             .setTimestamp()
             .setFooter({ text: `Event ${action} at` });
 
-        await logChannel.send({ embeds: [embed] });
+        const files = [];
+        let payoutFilePath = null;
+        if (action === 'ended' && options.payoutId) {
+            const payoutDetails = await Database.all(
+                `SELECT payout_details.booster_id, payout_details.amount
+                 FROM payout_details
+                 WHERE payout_details.payout_id = ?
+                 ORDER BY payout_details.amount DESC, payout_details.booster_id ASC`,
+                [options.payoutId]
+            );
+
+            if (payoutDetails.length > 0) {
+                const fileName = `event-${event.event_id}-payouts.txt`;
+                payoutFilePath = path.join(__dirname, '../../data/logs', fileName);
+                const logsDir = path.dirname(payoutFilePath);
+                if (!fs.existsSync(logsDir)) {
+                    fs.mkdirSync(logsDir, { recursive: true });
+                }
+
+                const payoutLines = payoutDetails.map((detail, index) => {
+                    const rosterEntry = rosterEntries.find(entry => entry.booster === `<@${detail.booster_id}>`);
+                    return `${index + 1}. Booster: ${detail.booster_id} | Character: ${rosterEntry?.character || 'Unknown'} | Paid: ${Number(detail.amount).toLocaleString()}g`;
+                }).join('\n');
+
+                fs.writeFileSync(payoutFilePath, payoutLines, 'utf8');
+                files.push(new AttachmentBuilder(payoutFilePath, { name: fileName }));
+            }
+        }
+
+        await logChannel.send({ embeds: [embed], files });
+        if (payoutFilePath) {
+            setTimeout(() => {
+                try {
+                    if (fs.existsSync(payoutFilePath)) {
+                        fs.unlinkSync(payoutFilePath);
+                    }
+                } catch (cleanupError) {
+                    logger.logError(cleanupError, { context: 'CLEANUP_EVENT_PAYOUT_LOG_FILE', payoutFilePath });
+                }
+            }, 5000);
+        }
         logger.logInfo(`Event logged: ${event.event_id} - ${action}`);
     } catch (error) {
         logger.logError(error, { context: 'LOG_EVENT', eventId: event.event_id });

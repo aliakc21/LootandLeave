@@ -111,11 +111,15 @@ class Database {
                     message_id TEXT,
                     channel_id TEXT,
                     event_type TEXT DEFAULT 'raid',
+                    event_difficulty TEXT,
                     status TEXT DEFAULT 'open',
                     min_item_level INTEGER DEFAULT 0,
                     min_rio_score INTEGER DEFAULT 0,
                     client_limit INTEGER DEFAULT 0,
                     balance_pool INTEGER DEFAULT 0,
+                    cut_treasury_rate DOUBLE PRECISION,
+                    cut_advertiser_rate DOUBLE PRECISION,
+                    cut_booster_rate DOUBLE PRECISION,
                     created_by TEXT NOT NULL,
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 )
@@ -228,6 +232,8 @@ class Database {
                     character_name TEXT NOT NULL,
                     character_realm TEXT NOT NULL,
                     event_id TEXT REFERENCES events(event_id),
+                    event_type TEXT DEFAULT 'raid',
+                    lock_scope TEXT,
                     locked_until TIMESTAMPTZ NOT NULL,
                     locked_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 )
@@ -290,7 +296,11 @@ class Database {
             `ALTER TABLE events ADD COLUMN min_item_level INTEGER DEFAULT 0`,
             `ALTER TABLE events ADD COLUMN min_rio_score INTEGER DEFAULT 0`,
             `ALTER TABLE events ADD COLUMN event_type TEXT DEFAULT 'raid'`,
+            `ALTER TABLE events ADD COLUMN event_difficulty TEXT`,
             `ALTER TABLE events ADD COLUMN client_limit INTEGER DEFAULT 0`,
+            `ALTER TABLE events ADD COLUMN cut_treasury_rate DOUBLE PRECISION`,
+            `ALTER TABLE events ADD COLUMN cut_advertiser_rate DOUBLE PRECISION`,
+            `ALTER TABLE events ADD COLUMN cut_booster_rate DOUBLE PRECISION`,
             `ALTER TABLE tickets ADD COLUMN boost_type TEXT`,
             `ALTER TABLE tickets ADD COLUMN event_id TEXT`,
             `ALTER TABLE tickets ADD COLUMN boost_label TEXT`,
@@ -304,6 +314,8 @@ class Database {
             `ALTER TABLE tickets ADD COLUMN approved_at TIMESTAMPTZ`,
             `ALTER TABLE tickets ADD COLUMN approved_by TEXT`,
             `ALTER TABLE tickets ADD COLUMN settled_gold INTEGER`,
+            `ALTER TABLE character_weekly_locks ADD COLUMN event_type TEXT DEFAULT 'raid'`,
+            `ALTER TABLE character_weekly_locks ADD COLUMN lock_scope TEXT`,
         ];
 
         for (const migration of migrations) {

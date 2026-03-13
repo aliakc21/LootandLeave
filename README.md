@@ -56,6 +56,9 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 - `DATABASE_SSL`: Set to `true` for Railway hosted Postgres, `false` for most local PostgreSQL installs
 - `CHARACTER_REFRESH_INTERVAL_MINUTES`: How old a character can be before it is refreshed automatically
 - `CHARACTER_REFRESH_BATCH_SIZE`: Hourly background refresh batch size
+- `DEFAULT_EVENT_CUT_TREASURY`: Default treasury cut if an event-specific cut is not set
+- `DEFAULT_EVENT_CUT_ADVERTISER`: Default advertiser cut if an event-specific cut is not set
+- `DEFAULT_EVENT_CUT_BOOSTER`: Default booster cut if an event-specific cut is not set
 - `CHANNEL_CLIENT_CATEGORY`: Category ID for client channels
 - `CHANNEL_BOOSTER_CATEGORY`: Category ID for booster channels
 - `CHANNEL_APPLICATIONS`: Channel ID for booster applications
@@ -97,6 +100,7 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 - `/registerchars` - Register multiple WoW characters at once using `Character-Realm` entries
 - `/mychars` - View your registered characters
 - `/refreshchars` - Refresh one character or all registered characters from Raider.IO
+- `/seteventcuts` - Set or reset event-specific cut percentages
 
 ### Management Commands
 - `/payout` - Process a payout for completed job/event

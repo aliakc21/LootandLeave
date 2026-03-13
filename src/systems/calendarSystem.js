@@ -8,6 +8,7 @@ const logChannelSystem = require('./logChannelSystem');
 const config = require('../utils/config');
 const { getRaidImageUrl, getDungeonImageUrl } = require('../utils/mediaCatalog');
 const ticketSystem = require('./ticketSystem');
+const { resolveEventCutRates, formatCutRates } = require('../utils/cutConfig');
 
 let client = null;
 
@@ -147,21 +148,42 @@ async function getApprovedClientsForEvent(eventId) {
     }
 }
 
+function getEventCutText(event) {
+    return formatCutRates(resolveEventCutRates(event));
+}
+
 async function createEvent(eventName, description, scheduledDate, createdBy, guild, requirements = {}) {
     const eventId = `event-${uuidv4().substring(0, 8)}`;
     const minItemLevel = requirements.minItemLevel || 0;
     const minRioScore = requirements.minRioScore || 0;
     const clientLimit = requirements.clientLimit || 0;
     const eventType = requirements.eventType || 'raid';
+    const eventDifficulty = requirements.eventDifficulty || null;
+    const customCuts = requirements.customCuts || null;
     const categoryName = requirements.categoryName || getWeekdayName(new Date(scheduledDate));
     const scheduledDateIso = new Date(scheduledDate).toISOString();
 
     try {
         // Save event to database first
         await Database.run(
-            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, status, min_item_level, min_rio_score, client_limit)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [eventId, eventName, description, scheduledDateIso, createdBy, eventType, 'open', minItemLevel, minRioScore, clientLimit]
+            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, event_difficulty, status, min_item_level, min_rio_score, client_limit, cut_treasury_rate, cut_advertiser_rate, cut_booster_rate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                eventId,
+                eventName,
+                description,
+                scheduledDateIso,
+                createdBy,
+                eventType,
+                eventDifficulty,
+                'open',
+                minItemLevel,
+                minRioScore,
+                clientLimit,
+                customCuts?.treasuryRate ?? null,
+                customCuts?.advertiserRate ?? null,
+                customCuts?.boosterRate ?? null,
+            ]
         );
 
         // Get weekday and create/find category
@@ -256,9 +278,11 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 { name: '📅 Category', value: categoryName, inline: true },
                 { name: '🆔 Event ID', value: `\`${eventId}\``, inline: true },
                 { name: '📊 Status', value: '🟢 Applications Open', inline: true },
+                { name: '⚔️ Difficulty', value: eventDifficulty || (eventType === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
                 { name: '🛡️ Min Item Level', value: String(minItemLevel), inline: true },
                 { name: '🏆 Min Raider.IO', value: String(minRioScore), inline: true },
                 { name: '👤 Client Slots', value: clientLimit === 0 ? 'Unlimited' : `0/${clientLimit}`, inline: true },
+                { name: '💰 Cuts', value: getEventCutText({ cut_treasury_rate: customCuts?.treasuryRate ?? null, cut_advertiser_rate: customCuts?.advertiserRate ?? null, cut_booster_rate: customCuts?.boosterRate ?? null }), inline: false },
                 { name: '👥 Roster', value: 'No characters selected yet', inline: false },
                 { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
             )
@@ -463,9 +487,13 @@ async function selectCharacterForEvent(eventId, boosterId, characterName, charac
             ? {
                 lockedUntil: characterSystem.getMythicPlusLockUntil(),
                 lockReason: 'the next 1 hour 30 minutes',
+                eventType: 'mythic_plus',
+                lockScope: event.event_id,
             }
             : {
                 lockReason: 'this week',
+                eventType: 'raid',
+                lockScope: event.event_difficulty || 'raid',
             };
 
         const lockResult = await characterSystem.lockCharacter(
@@ -532,7 +560,7 @@ async function deselectCharacterFromEvent(eventId, boosterId, characterName, cha
             [eventId]
         );
         if (event) {
-            await characterSystem.unlockCharacter(boosterId, characterName, characterRealm);
+            await characterSystem.unlockCharacter(boosterId, characterName, characterRealm, { eventId });
         }
 
         // Update event roster
@@ -611,9 +639,11 @@ async function updateEventRoster(eventId) {
             { name: '📅 Category', value: categoryLabel, inline: true },
             { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
             { name: '📊 Status', value: event.status === 'open' ? '🟢 Applications Open' : event.status === 'ended' ? '✅ Ended' : '❌ Cancelled', inline: true },
+            { name: '⚔️ Difficulty', value: event.event_difficulty || (event.event_type === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
             { name: '🛡️ Min Item Level', value: String(event.min_item_level || 0), inline: true },
             { name: '🏆 Min Raider.IO', value: String(event.min_rio_score || 0), inline: true },
             { name: '👤 Client Slots', value: event.client_limit > 0 ? `${assignedClients}/${event.client_limit}` : `${assignedClients}/Unlimited`, inline: true },
+            { name: '💰 Cuts', value: getEventCutText(event), inline: false },
             { 
                 name: `👥 Roster (${rosterEntries.length})`, 
                 value: rosterEntries.length > 0 
@@ -768,7 +798,7 @@ async function endEvent(eventId, totalGoldFromModal, endedBy) {
             }
         }
         // Log to event logs channel
-        await logChannelSystem.logEvent(event, 'ended', endedBy);
+        await logChannelSystem.logEvent(event, 'ended', endedBy, { payoutId: payoutResult.payoutId });
 
         return { 
             success: true, 
@@ -808,7 +838,7 @@ async function cancelEvent(eventId, cancelledBy) {
         // Unlock all characters when the event is cancelled
         let unlockedCount = 0;
         for (const app of applications) {
-            const unlockResult = await characterSystem.unlockCharacter(app.booster_id, app.character_name, app.character_realm);
+            const unlockResult = await characterSystem.unlockCharacter(app.booster_id, app.character_name, app.character_realm, { eventId });
             if (unlockResult.success) {
                 unlockedCount++;
             }

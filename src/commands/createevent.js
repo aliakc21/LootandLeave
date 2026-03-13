@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const calendarSystem = require('../systems/calendarSystem');
 const logger = require('../utils/logger');
 const { MIDNIGHT_RAIDS, RAID_DIFFICULTIES, buildRaidEventName } = require('../utils/contentCatalog');
+const { parseCutConfig, formatCutRates } = require('../utils/cutConfig');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -40,6 +41,10 @@ module.exports = {
         .addIntegerOption(option =>
             option.setName('capacity')
                 .setDescription('Optional max number of clients for this raid (0 = unlimited)')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('cuts')
+                .setDescription('Optional cut config in the format 30/10/60 (treasury/advertiser/booster)')
                 .setRequired(false)),
     async execute(interaction) {
         // Permission check
@@ -68,6 +73,8 @@ module.exports = {
             const minItemLevel = interaction.options.getInteger('min_item_level') || 0;
             const minRioScore = interaction.options.getInteger('min_rio_score') || 0;
             const clientLimit = interaction.options.getInteger('capacity') || 0;
+            const cutsInput = interaction.options.getString('cuts');
+            const customCuts = cutsInput ? parseCutConfig(cutsInput) : null;
 
             if (!eventName) {
                 return interaction.editReply({ content: '❌ Invalid raid or difficulty selection.' });
@@ -94,11 +101,11 @@ module.exports = {
                 scheduledDate,
                 interaction.user.id,
                 interaction.guild,
-                { minItemLevel, minRioScore, clientLimit }
+                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId, customCuts }
             );
             
             await interaction.editReply({ 
-                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Category:** ${new Date(scheduledDate).toLocaleDateString('en-US', { weekday: 'long' })}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Client Limit:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}` 
+                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Category:** ${new Date(scheduledDate).toLocaleDateString('en-US', { weekday: 'long' })}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Client Limit:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${customCuts ? formatCutRates(customCuts) : 'Default env/config cuts'}` 
             });
         } catch (error) {
             logger.logError(error, { context: 'CREATE_EVENT_COMMAND', userId: interaction.user.id });

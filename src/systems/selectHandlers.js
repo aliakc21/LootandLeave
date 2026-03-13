@@ -65,7 +65,11 @@ async function resetManagerCharacterSelectionMessage(message, eventId, boosterId
     const availableChars = await require('./characterSystem').getAvailableCharacters(
         boosterId,
         event.min_item_level || 0,
-        event.min_rio_score || 0
+        event.min_rio_score || 0,
+        {
+            eventType: event.event_type,
+            eventDifficulty: event.event_difficulty,
+        }
     );
 
     const selectionMenu = new StringSelectMenuBuilder()

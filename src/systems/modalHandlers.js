@@ -9,6 +9,7 @@ const { buildRaidEventName } = require('../utils/contentCatalog');
 const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
 const mplusRequestStore = require('../utils/mplusRequestStore');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
+const { getDefaultCutRates, formatCutRates } = require('../utils/cutConfig');
 
 function buildMythicDungeonSelect(sessionId, runNumber) {
     const dungeonSelectMenu = new StringSelectMenuBuilder()
@@ -270,11 +271,11 @@ async function handleModal(interaction) {
                 scheduledDate,
                 interaction.user.id,
                 interaction.guild,
-                { minItemLevel, minRioScore, clientLimit }
+                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId }
             );
 
             await interaction.editReply({
-                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Capacity:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}`
+                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Capacity:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${formatCutRates(getDefaultCutRates())}`
             });
         } catch (error) {
             logger.logError(error, { context: 'CREATE_EVENT_PANEL_MODAL', userId: interaction.user.id, raidId, difficultyId });
@@ -397,6 +398,25 @@ async function handleModal(interaction) {
 
         const result = await calendarSystem.endEvent(eventId, totalGold, interaction.user.id);
         
+        if (result.success) {
+            await interaction.editReply({ content: `✅ ${result.message}` });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('cancel_event_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const eventId = customId.replace('cancel_event_modal_', '');
+        const confirmation = interaction.fields.getTextInputValue('cancel_confirmation').trim().toUpperCase();
+        if (confirmation !== 'CANCEL') {
+            await interaction.editReply({ content: '❌ Cancellation aborted. Type `CANCEL` exactly to confirm.' });
+            return;
+        }
+
+        const result = await calendarSystem.cancelEvent(eventId, interaction.user.id);
         if (result.success) {
             await interaction.editReply({ content: `✅ ${result.message}` });
         } else {

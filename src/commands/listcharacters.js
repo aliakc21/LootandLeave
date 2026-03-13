@@ -31,7 +31,10 @@ module.exports = {
 
             const minItemLevel = event.min_item_level || 0;
             const minRioScore = event.min_rio_score || 0;
-            const availableChars = await characterSystem.getAvailableCharacters(interaction.user.id, minItemLevel, minRioScore);
+            const availableChars = await characterSystem.getAvailableCharacters(interaction.user.id, minItemLevel, minRioScore, {
+                eventType: event.event_type,
+                eventDifficulty: event.event_difficulty,
+            });
 
             if (availableChars.length === 0) {
                 await interaction.editReply({

@@ -2,14 +2,28 @@ const Database = require('../database/database');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('../utils/uuid');
 const config = require('../utils/config');
+const { resolveEventCutRates } = require('../utils/cutConfig');
 
 // Calculate and process payout
 async function processPayout(totalGold, boosterIds, createdBy, eventId = null, jobId = null) {
     try {
-        // Get commission rates from config
-        const treasuryRate = await config.getConfig('commission_treasury', 0.30);
-        const advertiserRate = await config.getConfig('commission_advertiser', 0.10);
-        const boosterRate = await config.getConfig('commission_booster', 0.60);
+        let event = null;
+        if (eventId) {
+            event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        }
+
+        const defaultTreasuryRate = await config.getConfig('commission_treasury', 0.30);
+        const defaultAdvertiserRate = await config.getConfig('commission_advertiser', 0.10);
+        const defaultBoosterRate = await config.getConfig('commission_booster', 0.60);
+        const resolvedCuts = resolveEventCutRates({
+            ...event,
+            cut_treasury_rate: event?.cut_treasury_rate ?? null,
+            cut_advertiser_rate: event?.cut_advertiser_rate ?? null,
+            cut_booster_rate: event?.cut_booster_rate ?? null,
+        });
+        const treasuryRate = event ? resolvedCuts.treasuryRate : defaultTreasuryRate;
+        const advertiserRate = event ? resolvedCuts.advertiserRate : defaultAdvertiserRate;
+        const boosterRate = event ? resolvedCuts.boosterRate : defaultBoosterRate;
 
         // Calculate amounts
         const treasuryAmount = Math.floor(totalGold * treasuryRate);
@@ -52,6 +66,7 @@ async function processPayout(totalGold, boosterIds, createdBy, eventId = null, j
             advertiserAmount,
             boosterTotalAmount,
             boosterIndividualAmount,
+            cuts: { treasuryRate, advertiserRate, boosterRate },
         };
     } catch (error) {
         logger.logError(error, { context: 'PROCESS_PAYOUT', totalGold, boosterIds });

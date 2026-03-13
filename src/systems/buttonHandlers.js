@@ -8,40 +8,9 @@ const createEndEventModal = require('../modals/endEventModal');
 const Database = require('../database/database');
 const createApproveRaidTicketModal = require('../modals/approveRaidTicketModal');
 const createApproveMythicTicketModal = require('../modals/approveMythicTicketModal');
+const createCancelEventModal = require('../modals/cancelEventModal');
 const { MIDNIGHT_RAIDS } = require('../utils/contentCatalog');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
-
-function buildRegisterCharacterSessionMessage(session) {
-    const queuedCharacters = session.characters.length > 0
-        ? session.characters.map((entry, index) => `${index + 1}. ${entry.characterName}-${entry.characterRealm}`).join('\n')
-        : 'No characters queued yet.';
-
-    const actionRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`add_register_character_${session.sessionId}`)
-            .setLabel('Add Another Character')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('➕')
-            .setDisabled(session.characters.length >= 20),
-        new ButtonBuilder()
-            .setCustomId(`finish_register_characters_${session.sessionId}`)
-            .setLabel('Finish Registration')
-            .setStyle(ButtonStyle.Success)
-            .setEmoji('✅')
-            .setDisabled(session.characters.length === 0),
-        new ButtonBuilder()
-            .setCustomId(`cancel_register_characters_${session.sessionId}`)
-            .setLabel('Cancel')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('✖️')
-    );
-
-    return {
-        content: `Queued characters (${session.characters.length}/20):\n${queuedCharacters}`,
-        components: [actionRow],
-        flags: MessageFlags.Ephemeral
-    };
-}
 
 // Check if user has permission
 function hasPermission(member, roles) {
@@ -341,7 +310,11 @@ async function handleButton(interaction) {
         const availableChars = await characterSystem.getAvailableCharacters(
             interaction.user.id,
             event.min_item_level || 0,
-            event.min_rio_score || 0
+            event.min_rio_score || 0,
+            {
+                eventType: event.event_type,
+                eventDifficulty: event.event_difficulty,
+            }
         );
 
         if (availableChars.length === 0) {
@@ -444,16 +417,8 @@ async function handleButton(interaction) {
             return;
         }
 
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
         const eventId = customId.replace('cancel_event_', '');
-        const result = await calendarSystem.cancelEvent(eventId, interaction.user.id);
-
-        if (result.success) {
-            await interaction.editReply({ content: `✅ ${result.message}` });
-        } else {
-            await interaction.editReply({ content: `❌ ${result.message}` });
-        }
+        await interaction.showModal(createCancelEventModal(eventId));
         return;
     }
 

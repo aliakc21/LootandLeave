@@ -273,7 +273,32 @@ async function refreshStaleCharactersBatch(limit = getCharacterRefreshBatchSize(
 }
 
 // Get available (unlocked) characters for a booster
-async function getAvailableCharacters(boosterId, minItemLevel = 0, minRioScore = 0) {
+function isLockBlockingEvent(lock, options = {}) {
+    const eventType = options.eventType || null;
+    const eventDifficulty = options.eventDifficulty || null;
+    const lockEventType = lock.event_type || 'raid';
+    const lockScope = lock.lock_scope || 'raid';
+
+    if (!eventType) {
+        return true;
+    }
+
+    if (lockEventType === 'mythic_plus') {
+        return true;
+    }
+
+    if (eventType === 'mythic_plus') {
+        return lockEventType === 'mythic_plus';
+    }
+
+    if (eventType === 'raid') {
+        return lockEventType === 'mythic_plus' || lockScope === (eventDifficulty || 'raid');
+    }
+
+    return true;
+}
+
+async function getAvailableCharacters(boosterId, minItemLevel = 0, minRioScore = 0, options = {}) {
     try {
         const now = new Date().toISOString();
         const characters = await Database.all(
@@ -281,17 +306,24 @@ async function getAvailableCharacters(boosterId, minItemLevel = 0, minRioScore =
              WHERE c.booster_id = ?
              AND c.item_level >= ?
              AND c.rio_score >= ?
-             AND NOT EXISTS (
-                 SELECT 1 FROM character_weekly_locks l
-                 WHERE l.booster_id = c.booster_id
-                 AND l.character_name = c.character_name
-                 AND l.character_realm = c.character_realm
-                 AND l.locked_until > ?
-             )
              ORDER BY c.item_level DESC, c.rio_score DESC`,
-            [boosterId, minItemLevel, minRioScore, now]
+            [boosterId, minItemLevel, minRioScore]
         );
-        return characters;
+        const activeLocks = await Database.all(
+            `SELECT * FROM character_weekly_locks
+             WHERE booster_id = ?
+             AND locked_until > ?`,
+            [boosterId, now]
+        );
+
+        return characters.filter(character => {
+            const characterLocks = activeLocks.filter(lock =>
+                lock.character_name === character.character_name
+                && lock.character_realm === character.character_realm
+            );
+
+            return !characterLocks.some(lock => isLockBlockingEvent(lock, options));
+        });
     } catch (error) {
         logger.logError(error, { context: 'GET_AVAILABLE_CHARACTERS', boosterId });
         return [];
@@ -303,13 +335,19 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
     try {
         const lockedUntil = options.lockedUntil || getNextWednesday();
         const lockReason = options.lockReason || 'this week';
+        const eventType = options.eventType || 'raid';
+        const lockScope = options.lockScope || null;
         
         // Check if character is already locked
-        const existing = await Database.get(
+        const existingLocks = await Database.all(
             `SELECT * FROM character_weekly_locks 
              WHERE booster_id = ? AND character_name = ? AND character_realm = ? AND locked_until > CURRENT_TIMESTAMP`,
             [boosterId, characterName, characterRealm]
         );
+        const existing = existingLocks.find(lock => isLockBlockingEvent(lock, {
+            eventType,
+            eventDifficulty: eventType === 'raid' ? lockScope : null,
+        }));
         
         if (existing) {
             return { success: false, message: `This character is already locked for ${lockReason}.` };
@@ -317,11 +355,11 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
         
         // Lock the character
         await Database.run(
-            `INSERT INTO character_weekly_locks (booster_id, character_name, character_realm, event_id, locked_until) VALUES (?, ?, ?, ?, ?)`,
-            [boosterId, characterName, characterRealm, eventId, lockedUntil]
+            `INSERT INTO character_weekly_locks (booster_id, character_name, character_realm, event_id, event_type, lock_scope, locked_until) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [boosterId, characterName, characterRealm, eventId, eventType, lockScope, lockedUntil]
         );
         
-        logger.logAction('CHARACTER_LOCKED', boosterId, { characterName, characterRealm, eventId, lockedUntil, lockReason });
+        logger.logAction('CHARACTER_LOCKED', boosterId, { characterName, characterRealm, eventId, lockedUntil, lockReason, eventType, lockScope });
         return { success: true };
     } catch (error) {
         logger.logError(error, { context: 'LOCK_CHARACTER', boosterId, characterName, characterRealm });
@@ -336,13 +374,33 @@ function getMythicPlusLockUntil() {
 }
 
 // Unlock a character (for admin use)
-async function unlockCharacter(boosterId, characterName, characterRealm) {
+async function unlockCharacter(boosterId, characterName, characterRealm, options = {}) {
     try {
+        const filters = [
+            `booster_id = ?`,
+            `character_name = ?`,
+            `character_realm = ?`,
+        ];
+        const params = [boosterId, characterName, characterRealm];
+
+        if (options.eventId) {
+            filters.push(`event_id = ?`);
+            params.push(options.eventId);
+        }
+        if (options.eventType) {
+            filters.push(`event_type = ?`);
+            params.push(options.eventType);
+        }
+        if (options.lockScope) {
+            filters.push(`lock_scope = ?`);
+            params.push(options.lockScope);
+        }
+
         await Database.run(
-            `UPDATE character_weekly_locks SET locked_until = CURRENT_TIMESTAMP WHERE booster_id = ? AND character_name = ? AND character_realm = ?`,
-            [boosterId, characterName, characterRealm]
+            `UPDATE character_weekly_locks SET locked_until = CURRENT_TIMESTAMP WHERE ${filters.join(' AND ')}`,
+            params
         );
-        logger.logAction('CHARACTER_UNLOCKED', boosterId, { characterName, characterRealm });
+        logger.logAction('CHARACTER_UNLOCKED', boosterId, { characterName, characterRealm, ...options });
         return { success: true };
     } catch (error) {
         logger.logError(error, { context: 'UNLOCK_CHARACTER', boosterId, characterName, characterRealm });

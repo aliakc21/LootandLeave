@@ -72,7 +72,6 @@ module.exports = {
 
             components.push(new ActionRowBuilder().addComponents(selectionMenu));
 
-            // Add deselect button if character is selected
             if (selectedApp) {
                 const deselectButton = new ButtonBuilder()
                     .setCustomId(`deselect_char_${event.event_id}_${interaction.user.id}_${selectedApp.character_name}_${selectedApp.character_realm}`)
@@ -82,6 +81,14 @@ module.exports = {
 
                 const deselectRow = new ActionRowBuilder().addComponents(deselectButton);
                 components.push(deselectRow);
+            } else {
+                const revertButton = new ButtonBuilder()
+                    .setCustomId(`revert_listing_${event.event_id}_${interaction.user.id}`)
+                    .setLabel('Revert Listing')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('↩️');
+
+                components.push(new ActionRowBuilder().addComponents(revertButton));
             }
 
             // Send to channel (not ephemeral) so managers can see and select

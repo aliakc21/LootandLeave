@@ -91,9 +91,20 @@ async function resetManagerCharacterSelectionMessage(message, eventId, boosterId
             }))
         );
 
-    await message.edit({
-        components: [new ActionRowBuilder().addComponents(selectionMenu)]
-    });
+    const components = [new ActionRowBuilder().addComponents(selectionMenu)];
+    if (availableChars.length > 0) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`revert_listing_${eventId}_${boosterId}`)
+                    .setLabel('Revert Listing')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('↩️')
+            )
+        );
+    }
+
+    await message.edit({ components });
 }
 
 async function handleSelect(interaction) {
@@ -392,7 +403,17 @@ async function handleSelect(interaction) {
         const [characterName, characterRealm] = interaction.values[0].split('|');
 
         try {
-            const result = await calendarSystem.selectCharacterForEvent(eventId, boosterId, characterName, characterRealm, interaction.user.id);
+            const result = await calendarSystem.selectCharacterForEvent(
+                eventId,
+                boosterId,
+                characterName,
+                characterRealm,
+                interaction.user.id,
+                {
+                    listingChannelId: interaction.channel.id,
+                    listingMessageId: interaction.message.id,
+                }
+            );
 
             if (!result.success) {
                 await interaction.editReply({ content: `❌ ${result.message}` });

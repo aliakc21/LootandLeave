@@ -402,6 +402,34 @@ module.exports = {
                 }] : []),
             ]);
 
+            const cancelRequestsChannel = await getOrCreateTextChannel(interaction.guild, 'cancel-requests', { parent: boosterCategoryId });
+            await applyPermissions(cancelRequestsChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }] : []),
+                ...(applicantRoleId ? [{
+                    id: applicantRoleId,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }] : []),
+            ]);
+
             const appEmbed = new EmbedBuilder()
                 .setTitle('Become a Booster')
                 .setDescription('After choosing the booster path in `start-here`, click below to start your application.')

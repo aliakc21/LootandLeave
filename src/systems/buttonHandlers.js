@@ -175,6 +175,95 @@ async function handleButton(interaction) {
         return;
     }
 
+    if (customId.startsWith('request_selection_cancel_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const applicationId = customId.replace('request_selection_cancel_', '');
+        const result = await calendarSystem.createSelectionCancelRequest(applicationId, interaction.user.id);
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        const disabledButton = ButtonBuilder.from(interaction.component).setDisabled(true).setLabel('Cancel Request Submitted');
+        await interaction.message.edit({
+            components: [new ActionRowBuilder().addComponents(disabledButton)]
+        }).catch(() => {});
+        await interaction.editReply({ content: '✅ Your cancel request was sent to admins for review.' });
+        return;
+    }
+
+    if (customId.startsWith('approve_selection_cancel_')) {
+        if (!hasPermission(interaction.member, ['admin'])) {
+            await interaction.reply({ content: 'Only admins can approve selection cancellations.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const requestId = customId.replace('approve_selection_cancel_', '');
+        const result = await calendarSystem.approveSelectionCancelRequest(requestId, interaction.user.id);
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+        embed.setColor(0x00FF00);
+        embed.addFields({ name: 'Status', value: `Approved by <@${interaction.user.id}>`, inline: false });
+        await interaction.message.edit({ embeds: [embed], components: [] });
+        await interaction.editReply({ content: `✅ ${result.message}` });
+        return;
+    }
+
+    if (customId.startsWith('reject_selection_cancel_')) {
+        if (!hasPermission(interaction.member, ['admin'])) {
+            await interaction.reply({ content: 'Only admins can reject selection cancellations.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const requestId = customId.replace('reject_selection_cancel_', '');
+        const result = await calendarSystem.rejectSelectionCancelRequest(requestId, interaction.user.id);
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+        embed.setColor(0xFF0000);
+        embed.addFields({ name: 'Status', value: `Rejected by <@${interaction.user.id}>`, inline: false });
+        await interaction.message.edit({ embeds: [embed], components: [] });
+        await interaction.editReply({ content: `✅ ${result.message}` });
+        return;
+    }
+
+    if (customId.startsWith('revert_listing_')) {
+        await interaction.deferUpdate();
+
+        const parts = customId.replace('revert_listing_', '').split('_');
+        const eventId = parts[0];
+        const boosterId = parts.slice(1).join('_');
+
+        if (interaction.user.id !== boosterId && !hasPermission(interaction.member, ['admin', 'management', 'raid_leader'])) {
+            await interaction.followUp({ content: '❌ Only the booster who posted this listing or management can revert it.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const selectedApp = await Database.get(
+            `SELECT * FROM event_applications WHERE event_id = ? AND booster_id = ? AND status = 'approved'`,
+            [eventId, boosterId]
+        );
+        if (selectedApp) {
+            await interaction.followUp({ content: '❌ A character from this listing has already been selected. Use the DM `Cancel Selection` flow instead.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.message.delete().catch(async () => {
+            await interaction.editReply({ content: 'Listing reverted.', embeds: [], components: [] });
+        });
+        return;
+    }
+
     if (customId.startsWith('cancel_booster_application_')) {
         const sessionId = customId.replace('cancel_booster_application_', '');
         const session = boosterApplicationSessionStore.getSession(sessionId);
@@ -522,7 +611,10 @@ async function handleButton(interaction) {
         const charName = parts.slice(2, -1).join('_'); // Handle names with underscores
         const charRealm = parts[parts.length - 1];
 
-        const result = await calendarSystem.selectCharacterForEvent(eventId, boosterId, charName, charRealm, interaction.user.id);
+        const result = await calendarSystem.selectCharacterForEvent(eventId, boosterId, charName, charRealm, interaction.user.id, {
+            listingChannelId: interaction.channel.id,
+            listingMessageId: interaction.message.id,
+        });
 
         if (result.success) {
             await interaction.editReply({ content: '✅ Character selected for event.' });

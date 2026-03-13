@@ -112,6 +112,118 @@ async function getOrCreateWeekdayCategory(guild, weekdayName) {
     return getOrCreateNamedCategory(guild, weekdayName);
 }
 
+async function getOrCreateCancelRequestsChannel(guild) {
+    let channel = guild.channels.cache.find(
+        entry => entry.name === 'cancel-requests' && entry.type === ChannelType.GuildText
+    );
+
+    if (channel) {
+        return channel;
+    }
+
+    const adminRole = process.env.ROLE_ADMIN;
+    const managementRole = process.env.ROLE_MANAGEMENT;
+    const boosterCategoryId = process.env.CHANNEL_BOOSTER_CATEGORY;
+    const parent = boosterCategoryId ? guild.channels.cache.get(boosterCategoryId) : null;
+
+    channel = await guild.channels.create({
+        name: 'cancel-requests',
+        type: ChannelType.GuildText,
+        parent: parent?.id,
+        permissionOverwrites: [
+            {
+                id: guild.roles.everyone.id,
+                deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+                id: guild.members.me.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+            },
+            ...(adminRole ? [{
+                id: adminRole,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+            }] : []),
+            ...(managementRole ? [{
+                id: managementRole,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+            }] : []),
+        ],
+    });
+
+    return channel;
+}
+
+async function notifyBoosterOfSelection(event, application) {
+    try {
+        const booster = await client.users.fetch(application.booster_id);
+        if (!booster) {
+            return;
+        }
+
+        const eventDate = new Date(event.scheduled_date);
+        const eventDateTimestamp = Math.floor(eventDate.getTime() / 1000);
+        const embed = new EmbedBuilder()
+            .setTitle('Character Selected For Event')
+            .setDescription(`One of your characters has been selected for **${event.name}**.`)
+            .addFields(
+                { name: 'Character', value: `${application.character_name}-${application.character_realm}`, inline: true },
+                { name: 'Event ID', value: `\`${event.event_id}\``, inline: true },
+                { name: 'When', value: Number.isNaN(eventDate.getTime()) ? 'Scheduled soon' : `<t:${eventDateTimestamp}:F>`, inline: false }
+            )
+            .setColor(0x5865F2)
+            .setTimestamp();
+
+        const actionRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`request_selection_cancel_${application.id}`)
+                .setLabel('Cancel Selection')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('🛑')
+        );
+
+        await booster.send({
+            embeds: [embed],
+            components: [actionRow]
+        });
+    } catch (error) {
+        logger.logError(error, {
+            context: 'NOTIFY_BOOSTER_OF_SELECTION',
+            eventId: event.event_id,
+            boosterId: application.booster_id,
+            applicationId: application.id,
+        });
+    }
+}
+
+async function postSelectionCancelRequest(guild, request) {
+    const channel = await getOrCreateCancelRequestsChannel(guild);
+    const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [request.event_id]);
+    const embed = new EmbedBuilder()
+        .setTitle('Selection Cancel Request')
+        .setDescription(`<@${request.requested_by}> requested to cancel a roster selection.`)
+        .addFields(
+            { name: 'Request ID', value: `\`${request.id}\``, inline: true },
+            { name: 'Booster', value: `<@${request.booster_id}>`, inline: true },
+            { name: 'Character', value: `${request.character_name}-${request.character_realm}`, inline: true },
+            { name: 'Event', value: event ? `${event.name}\n\`${event.event_id}\`` : `\`${request.event_id}\``, inline: false }
+        )
+        .setColor(0xF1C40F)
+        .setTimestamp(new Date(request.created_at || Date.now()));
+
+    const actions = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`approve_selection_cancel_${request.id}`)
+            .setLabel('Approve Cancellation')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId(`reject_selection_cancel_${request.id}`)
+            .setLabel('Reject')
+            .setStyle(ButtonStyle.Secondary)
+    );
+
+    await channel.send({ embeds: [embed], components: [actions] });
+}
+
 // Create a new event
 async function getAssignedClientCount(eventId) {
     try {
@@ -456,7 +568,7 @@ async function approveMythicTicket(ticketId, approvedBy, settledGold, guild) {
 }
 
 // Select character for event (manager action)
-async function selectCharacterForEvent(eventId, boosterId, characterName, characterRealm, selectedBy) {
+async function selectCharacterForEvent(eventId, boosterId, characterName, characterRealm, selectedBy, options = {}) {
     try {
         const event = await Database.get(
             `SELECT * FROM events WHERE event_id = ?`,
@@ -519,21 +631,40 @@ async function selectCharacterForEvent(eventId, boosterId, characterName, charac
 
         if (existingApp) {
             await Database.run(
-                `UPDATE event_applications SET status = 'approved', approved_at = CURRENT_TIMESTAMP, approved_by = ? WHERE id = ?`,
-                [selectedBy, existingApp.id]
+                `UPDATE event_applications
+                 SET status = 'approved',
+                     approved_at = CURRENT_TIMESTAMP,
+                     approved_by = ?,
+                     listing_channel_id = COALESCE(?, listing_channel_id),
+                     listing_message_id = COALESCE(?, listing_message_id)
+                 WHERE id = ?`,
+                [selectedBy, options.listingChannelId || null, options.listingMessageId || null, existingApp.id]
             );
         } else {
             await Database.run(
-                `INSERT INTO event_applications (event_id, booster_id, character_name, character_realm, status, approved_at, approved_by) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
-                [eventId, boosterId, characterName, characterRealm, 'approved', selectedBy]
+                `INSERT INTO event_applications (
+                    event_id, booster_id, character_name, character_realm, listing_channel_id, listing_message_id, status, approved_at, approved_by
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+                [eventId, boosterId, characterName, characterRealm, options.listingChannelId || null, options.listingMessageId || null, 'approved', selectedBy]
             );
         }
 
+        const approvedApplication = await Database.get(
+            `SELECT * FROM event_applications
+             WHERE event_id = ? AND booster_id = ? AND character_name = ? AND character_realm = ? AND status = 'approved'
+             ORDER BY approved_at DESC NULLS LAST, id DESC
+             LIMIT 1`,
+            [eventId, boosterId, characterName, characterRealm]
+        );
+
         // Update event roster
         await updateEventRoster(eventId);
+        if (approvedApplication) {
+            await notifyBoosterOfSelection(event, approvedApplication);
+        }
 
         logger.logEventApproval(eventId, boosterId, selectedBy);
-        return { success: true, message: 'Character selected for event.' };
+        return { success: true, message: 'Character selected for event.', application: approvedApplication };
     } catch (error) {
         logger.logError(error, { context: 'SELECT_CHARACTER_FOR_EVENT', eventId, boosterId });
         return { success: false, message: `Error: ${error.message}` };
@@ -574,6 +705,170 @@ async function deselectCharacterFromEvent(eventId, boosterId, characterName, cha
         return { success: true, message: 'Character deselected from event.' };
     } catch (error) {
         logger.logError(error, { context: 'DESELECT_CHARACTER_FROM_EVENT', eventId, boosterId });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
+async function createSelectionCancelRequest(applicationId, requestedBy) {
+    try {
+        const application = await Database.get(
+            `SELECT * FROM event_applications WHERE id = ? AND status = 'approved'`,
+            [applicationId]
+        );
+        if (!application) {
+            return { success: false, message: 'That roster selection is no longer active.' };
+        }
+
+        if (application.booster_id !== requestedBy) {
+            return { success: false, message: 'You can only request cancellation for your own selected character.' };
+        }
+
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [application.event_id]);
+        if (!event || event.status !== 'open') {
+            return { success: false, message: 'This event is no longer open for selection changes.' };
+        }
+
+        const existingRequest = await Database.get(
+            `SELECT * FROM selection_cancel_requests
+             WHERE application_id = ? AND status = 'pending'
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [applicationId]
+        );
+        if (existingRequest) {
+            return { success: false, message: 'A cancellation request for this selection is already pending.' };
+        }
+
+        await Database.run(
+            `INSERT INTO selection_cancel_requests (
+                application_id, event_id, booster_id, character_name, character_realm,
+                source_channel_id, source_message_id, requested_by, status
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+                application.id,
+                application.event_id,
+                application.booster_id,
+                application.character_name,
+                application.character_realm,
+                application.listing_channel_id || null,
+                application.listing_message_id || null,
+                requestedBy,
+            ]
+        );
+
+        const request = await Database.get(
+            `SELECT * FROM selection_cancel_requests
+             WHERE application_id = ? AND requested_by = ? AND status = 'pending'
+             ORDER BY id DESC
+             LIMIT 1`,
+            [applicationId, requestedBy]
+        );
+
+        const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID);
+        await postSelectionCancelRequest(guild, request);
+        logger.logAction('SELECTION_CANCEL_REQUEST_CREATED', requestedBy, {
+            requestId: request.id,
+            applicationId,
+            eventId: application.event_id,
+        });
+
+        return { success: true, requestId: request.id };
+    } catch (error) {
+        logger.logError(error, { context: 'CREATE_SELECTION_CANCEL_REQUEST', applicationId, requestedBy });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
+async function approveSelectionCancelRequest(requestId, approvedBy) {
+    try {
+        const request = await Database.get(
+            `SELECT * FROM selection_cancel_requests WHERE id = ?`,
+            [requestId]
+        );
+        if (!request) {
+            return { success: false, message: 'Cancel request not found.' };
+        }
+        if (request.status !== 'pending') {
+            return { success: false, message: 'This cancel request has already been processed.' };
+        }
+
+        const result = await deselectCharacterFromEvent(
+            request.event_id,
+            request.booster_id,
+            request.character_name,
+            request.character_realm,
+            approvedBy
+        );
+        if (!result.success) {
+            return result;
+        }
+
+        await Database.run(
+            `UPDATE selection_cancel_requests
+             SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+             WHERE id = ?`,
+            [approvedBy, requestId]
+        );
+
+        if (request.source_channel_id && request.source_message_id) {
+            try {
+                const channel = await client.channels.fetch(request.source_channel_id);
+                const message = channel ? await channel.messages.fetch(request.source_message_id) : null;
+                if (message) {
+                    const selectHandlers = require('./selectHandlers');
+                    await selectHandlers.resetManagerCharacterSelectionMessage(message, request.event_id, request.booster_id);
+                }
+            } catch (error) {
+                logger.logError(error, { context: 'RESET_LISTING_MESSAGE_AFTER_CANCEL_APPROVAL', requestId });
+            }
+        }
+
+        try {
+            const booster = await client.users.fetch(request.booster_id);
+            await booster.send(`Your cancellation request for **${request.character_name}-${request.character_realm}** in \`${request.event_id}\` was approved.`);
+        } catch (error) {
+            logger.logError(error, { context: 'DM_CANCEL_REQUEST_APPROVED', requestId, boosterId: request.booster_id });
+        }
+
+        logger.logAction('SELECTION_CANCEL_REQUEST_APPROVED', approvedBy, { requestId, eventId: request.event_id });
+        return { success: true, message: 'Cancellation approved and character removed from the event roster.' };
+    } catch (error) {
+        logger.logError(error, { context: 'APPROVE_SELECTION_CANCEL_REQUEST', requestId, approvedBy });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
+async function rejectSelectionCancelRequest(requestId, reviewedBy) {
+    try {
+        const request = await Database.get(
+            `SELECT * FROM selection_cancel_requests WHERE id = ?`,
+            [requestId]
+        );
+        if (!request) {
+            return { success: false, message: 'Cancel request not found.' };
+        }
+        if (request.status !== 'pending') {
+            return { success: false, message: 'This cancel request has already been processed.' };
+        }
+
+        await Database.run(
+            `UPDATE selection_cancel_requests
+             SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+             WHERE id = ?`,
+            [reviewedBy, requestId]
+        );
+
+        try {
+            const booster = await client.users.fetch(request.booster_id);
+            await booster.send(`Your cancellation request for **${request.character_name}-${request.character_realm}** in \`${request.event_id}\` was rejected.`);
+        } catch (error) {
+            logger.logError(error, { context: 'DM_CANCEL_REQUEST_REJECTED', requestId, boosterId: request.booster_id });
+        }
+
+        logger.logAction('SELECTION_CANCEL_REQUEST_REJECTED', reviewedBy, { requestId, eventId: request.event_id });
+        return { success: true, message: 'Cancellation request rejected.' };
+    } catch (error) {
+        logger.logError(error, { context: 'REJECT_SELECTION_CANCEL_REQUEST', requestId, reviewedBy });
         return { success: false, message: `Error: ${error.message}` };
     }
 }
@@ -954,6 +1249,9 @@ module.exports = {
     getAvailableClientRaids,
     getAssignedClientCount,
     getApprovedClientsForEvent,
+    createSelectionCancelRequest,
+    approveSelectionCancelRequest,
+    rejectSelectionCancelRequest,
     assignClientToEvent,
     approveMythicTicket,
     selectCharacterForEvent,

@@ -134,10 +134,30 @@ class Database {
                     booster_id TEXT NOT NULL,
                     character_name TEXT,
                     character_realm TEXT,
+                    listing_channel_id TEXT,
+                    listing_message_id TEXT,
                     status TEXT DEFAULT 'pending',
                     applied_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     approved_at TIMESTAMPTZ,
                     approved_by TEXT
+                )
+            `);
+
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS selection_cancel_requests (
+                    id BIGSERIAL PRIMARY KEY,
+                    application_id BIGINT REFERENCES event_applications(id),
+                    event_id TEXT NOT NULL REFERENCES events(event_id),
+                    booster_id TEXT NOT NULL,
+                    character_name TEXT NOT NULL,
+                    character_realm TEXT NOT NULL,
+                    source_channel_id TEXT,
+                    source_message_id TEXT,
+                    requested_by TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TIMESTAMPTZ,
+                    reviewed_by TEXT
                 )
             `);
 
@@ -283,6 +303,7 @@ class Database {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_character_locks_booster ON character_weekly_locks (booster_id, locked_until)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_character_locks_character ON character_weekly_locks (character_name, character_realm, locked_until)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_event_applications_event ON event_applications (event_id, status)`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs (user_id, timestamp)`);
 
             await this.runMigrations(client);
@@ -296,6 +317,21 @@ class Database {
     async runMigrations(client = null) {
         const executor = client || this.ensurePool();
         const migrations = [
+            `CREATE TABLE IF NOT EXISTS selection_cancel_requests (
+                id BIGSERIAL PRIMARY KEY,
+                application_id BIGINT REFERENCES event_applications(id),
+                event_id TEXT NOT NULL REFERENCES events(event_id),
+                booster_id TEXT NOT NULL,
+                character_name TEXT NOT NULL,
+                character_realm TEXT NOT NULL,
+                source_channel_id TEXT,
+                source_message_id TEXT,
+                requested_by TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMPTZ,
+                reviewed_by TEXT
+            )`,
             `ALTER TABLE characters ADD COLUMN spec_name TEXT`,
             `ALTER TABLE characters ADD COLUMN locked_until TIMESTAMPTZ`,
             `ALTER TABLE characters ADD COLUMN locked_by_event TEXT`,
@@ -332,11 +368,14 @@ class Database {
             `ALTER TABLE booster_applications ADD COLUMN years_playing INTEGER`,
             `ALTER TABLE booster_applications ADD COLUMN years_boosting INTEGER`,
             `ALTER TABLE booster_applications ADD COLUMN registered_characters TEXT`,
+            `ALTER TABLE event_applications ADD COLUMN listing_channel_id TEXT`,
+            `ALTER TABLE event_applications ADD COLUMN listing_message_id TEXT`,
             `ALTER TABLE booster_applications ALTER COLUMN last_season_rio TYPE DOUBLE PRECISION USING last_season_rio::DOUBLE PRECISION`,
             `ALTER TABLE booster_applications ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
             `ALTER TABLE booster_applications ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
+            `CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`,
         ];
 
         for (const migration of migrations) {

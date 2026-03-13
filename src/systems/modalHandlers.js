@@ -44,6 +44,38 @@ async function handleModal(interaction) {
         return;
     }
 
+    if (customId === 'register_characters_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const singleCharacter = interaction.fields.getTextInputValue('single_character').trim();
+        const multipleCharacters = interaction.fields.getTextInputValue('multiple_characters').trim();
+        const combinedInput = [singleCharacter, multipleCharacters].filter(Boolean).join('\n');
+
+        if (!combinedInput) {
+            await interaction.editReply({
+                content: '❌ Please enter at least one character using the format `Character-Realm`.'
+            });
+            return;
+        }
+
+        const result = await characterSystem.registerMultipleCharacters(interaction.user.id, combinedInput);
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        const lines = [`✅ Registered or updated ${result.successes.length} character(s).`];
+        if (result.successes.length > 0) {
+            lines.push(`Success: ${result.successes.join(', ')}`.slice(0, 1900));
+        }
+        if (result.failures.length > 0) {
+            lines.push(`Failed: ${result.failures.join(' | ')}`.slice(0, 1900));
+        }
+
+        await interaction.editReply({ content: lines.join('\n') });
+        return;
+    }
+
     if (customId === 'mythic_plus_amount_modal') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

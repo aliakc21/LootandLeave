@@ -5,6 +5,22 @@ function isSnowflake(value) {
     return typeof value === 'string' && /^\d{17,20}$/.test(value);
 }
 
+async function getOrCreateTextChannel(guild, name, options = {}) {
+    const existing = guild.channels.cache.find(
+        channel => channel.name === name && channel.type === ChannelType.GuildText
+    );
+
+    if (existing) {
+        return existing;
+    }
+
+    return guild.channels.create({
+        name,
+        type: ChannelType.GuildText,
+        ...options,
+    });
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setup')
@@ -28,15 +44,15 @@ module.exports = {
             // Create categories if they don't exist
             const clientCategoryId = process.env.CHANNEL_CLIENT_CATEGORY;
             const boosterCategoryId = process.env.CHANNEL_BOOSTER_CATEGORY;
+            const boosterRoleId = process.env.ROLE_BOOSTER;
+            const managementRoleId = process.env.ROLE_MANAGEMENT;
 
             if (!clientCategoryId || !boosterCategoryId) {
                 return interaction.editReply({ content: '❌ Please configure CHANNEL_CLIENT_CATEGORY and CHANNEL_BOOSTER_CATEGORY in your .env file first.' });
             }
 
             // Create welcome channel with ticket button
-            const welcomeChannel = await interaction.guild.channels.create({
-                name: 'welcome',
-                type: ChannelType.GuildText,
+            const welcomeChannel = await getOrCreateTextChannel(interaction.guild, 'welcome', {
                 permissionOverwrites: [
                     {
                         id: interaction.guild.roles.everyone.id,
@@ -62,9 +78,7 @@ module.exports = {
 
             // Create admin-only event management channel with create event button
             const adminRoleId = process.env.ROLE_ADMIN;
-            const eventManagementChannel = await interaction.guild.channels.create({
-                name: 'event-management',
-                type: ChannelType.GuildText,
+            const eventManagementChannel = await getOrCreateTextChannel(interaction.guild, 'event-management', {
                 permissionOverwrites: [
                     {
                         id: interaction.guild.roles.everyone.id,
@@ -97,6 +111,48 @@ module.exports = {
                 components: [new ActionRowBuilder().addComponents(createEventButton)]
             });
 
+            const registerChannel = await getOrCreateTextChannel(interaction.guild, 'register-characters', {
+                parent: boosterCategoryId,
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.roles.everyone.id,
+                        deny: [PermissionFlagsBits.ViewChannel],
+                    },
+                    {
+                        id: interaction.guild.members.me.id,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    },
+                    ...(adminRoleId ? [{
+                        id: adminRoleId,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    }] : []),
+                    ...(managementRoleId ? [{
+                        id: managementRoleId,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    }] : []),
+                    ...(boosterRoleId ? [{
+                        id: boosterRoleId,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    }] : []),
+                ],
+            });
+
+            const registerEmbed = new EmbedBuilder()
+                .setTitle('Register Characters')
+                .setDescription('Click the button below to register one character or many characters at once.\nUse the format `Character-Realm`.')
+                .setColor(0x5865F2);
+
+            const registerButton = new ButtonBuilder()
+                .setCustomId('open_register_characters_modal')
+                .setLabel('Register Characters')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🧙');
+
+            await registerChannel.send({
+                embeds: [registerEmbed],
+                components: [new ActionRowBuilder().addComponents(registerButton)]
+            });
+
             // Create applications channel with application button
             const applicationsChannelId = process.env.CHANNEL_APPLICATIONS;
             if (isSnowflake(applicationsChannelId)) {
@@ -121,7 +177,7 @@ module.exports = {
             }
 
             logger.logAction('SETUP_COMPLETED', interaction.user.id, { guildId: interaction.guild.id });
-            await interaction.editReply({ content: '✅ Setup completed! Welcome channel and buttons created.' });
+            await interaction.editReply({ content: '✅ Setup completed! Welcome, event-management, and register-characters channels are ready.' });
         } catch (error) {
             logger.logError(error, { context: 'SETUP_COMMAND', userId: interaction.user.id });
             await interaction.editReply({ content: `❌ Error: ${error.message}` });

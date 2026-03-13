@@ -48,6 +48,12 @@ async function handleButton(interaction) {
         return;
     }
 
+    if (customId === 'open_register_characters_modal') {
+        const createRegisterCharactersModal = require('../modals/registerCharactersModal');
+        await interaction.showModal(createRegisterCharactersModal());
+        return;
+    }
+
     // Create ticket button
     if (customId === 'create_ticket') {
         const selectMenu = new StringSelectMenuBuilder()

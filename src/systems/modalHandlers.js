@@ -9,6 +9,7 @@ const { buildRaidEventName } = require('../utils/contentCatalog');
 const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
 const mplusRequestStore = require('../utils/mplusRequestStore');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
+const boosterApplicationSessionStore = require('../utils/boosterApplicationSessionStore');
 const { getDefaultCutRates, formatCutRates } = require('../utils/cutConfig');
 
 function buildMythicDungeonSelect(sessionId, runNumber) {
@@ -55,24 +56,92 @@ function buildRegisterCharacterSessionResponse(session) {
     };
 }
 
+function buildBoosterApplicationSessionResponse(session) {
+    const queuedCharacters = session.characters.length > 0
+        ? session.characters.map((entry, index) => `${index + 1}. ${entry.characterName}-${entry.characterRealm}`).join('\n')
+        : 'No characters added yet.';
+
+    return {
+        content: `Application details saved.\nQueued characters (${session.characters.length}/20):\n${queuedCharacters}`,
+        components: [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`add_booster_application_character_${session.sessionId}`)
+                    .setLabel('Add Character')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('➕')
+                    .setDisabled(session.characters.length >= 20),
+                new ButtonBuilder()
+                    .setCustomId(`submit_booster_application_${session.sessionId}`)
+                    .setLabel('Submit Application')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('✅')
+                    .setDisabled(session.characters.length === 0),
+                new ButtonBuilder()
+                    .setCustomId(`cancel_booster_application_${session.sessionId}`)
+                    .setLabel('Cancel')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('✖️')
+            )
+        ],
+    };
+}
+
 async function handleModal(interaction) {
     const { customId } = interaction;
 
     // Booster application modal
-    if (customId === 'booster_application_modal') {
+    if (customId === 'booster_application_profile_modal') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const characterName = interaction.fields.getTextInputValue('character_name');
-        const characterRealm = interaction.fields.getTextInputValue('character_realm');
-        const experience = interaction.fields.getTextInputValue('experience');
+        const battletag = interaction.fields.getTextInputValue('battletag').trim();
+        const lastSeasonRio = parseInt(interaction.fields.getTextInputValue('last_season_rio').trim(), 10);
+        const previousCommunities = interaction.fields.getTextInputValue('previous_communities').trim();
+        const yearsPlaying = parseInt(interaction.fields.getTextInputValue('years_playing').trim(), 10);
+        const yearsBoosting = parseInt(interaction.fields.getTextInputValue('years_boosting').trim(), 10);
 
-        const result = await applicationSystem.processApplication(interaction.user.id, characterName, characterRealm, experience);
-
-        if (result.success) {
-            await interaction.editReply({ content: '✅ Application submitted successfully! Management will review it shortly.' });
-        } else {
-            await interaction.editReply({ content: `❌ ${result.message}` });
+        if (Number.isNaN(lastSeasonRio) || lastSeasonRio < 0 || Number.isNaN(yearsPlaying) || yearsPlaying < 0 || Number.isNaN(yearsBoosting) || yearsBoosting < 0) {
+            await interaction.editReply({ content: '❌ Last season RIO and year fields must be zero or higher numbers.' });
+            return;
         }
+
+        const session = boosterApplicationSessionStore.createSession(interaction.user.id, {
+            battletag,
+            lastSeasonRio,
+            previousCommunities,
+            yearsPlaying,
+            yearsBoosting,
+        });
+
+        await interaction.editReply(buildBoosterApplicationSessionResponse(session));
+        return;
+    }
+
+    if (customId.startsWith('booster_application_character_modal:')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const sessionId = customId.split(':')[1];
+        const session = boosterApplicationSessionStore.getSession(sessionId);
+        const characterName = interaction.fields.getTextInputValue('character_name').trim();
+        const characterRealm = interaction.fields.getTextInputValue('character_realm').trim();
+
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.editReply({ content: '❌ This booster application session has expired. Please start again.' });
+            return;
+        }
+
+        if (!characterName || !characterRealm) {
+            await interaction.editReply({ content: '❌ Character name and realm are required.' });
+            return;
+        }
+
+        const addResult = boosterApplicationSessionStore.addCharacter(sessionId, characterName, characterRealm);
+        if (!addResult.success) {
+            await interaction.editReply({ content: `❌ ${addResult.message}` });
+            return;
+        }
+
+        await interaction.editReply(buildBoosterApplicationSessionResponse(addResult.session));
         return;
     }
 

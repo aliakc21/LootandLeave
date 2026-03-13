@@ -12,6 +12,7 @@ const createCancelEventModal = require('../modals/cancelEventModal');
 const { MIDNIGHT_RAIDS } = require('../utils/contentCatalog');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
 const { formatCutRates, resolveEventCutRates } = require('../utils/cutConfig');
+const boosterApplicationSessionStore = require('../utils/boosterApplicationSessionStore');
 
 // Check if user has permission
 function hasPermission(member, roles) {
@@ -42,12 +43,62 @@ function hasPermission(member, roles) {
 
 async function handleButton(interaction) {
     const { customId } = interaction;
+    const clientRoleId = process.env.ROLE_CLIENT;
+    const boosterRoleId = process.env.ROLE_BOOSTER;
+    const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
+
+    if (customId === 'choose_role_client') {
+        if (!clientRoleId) {
+            await interaction.reply({ content: '❌ ROLE_CLIENT is not configured.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const clientRole = interaction.guild.roles.cache.get(clientRoleId);
+        if (!clientRole) {
+            await interaction.reply({ content: '❌ Client role not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.member.roles.add(clientRole);
+        if (applicantRoleId && interaction.member.roles.cache.has(applicantRoleId)) {
+            await interaction.member.roles.remove(applicantRoleId).catch(() => {});
+        }
+        await interaction.reply({ content: '✅ You now have client access. Use the ticket button in welcome to buy a service.', flags: MessageFlags.Ephemeral });
+        return;
+    }
+
+    if (customId === 'choose_role_booster') {
+        if (!applicantRoleId) {
+            await interaction.reply({ content: '❌ ROLE_BOOSTER_APPLICANT is not configured.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const applicantRole = interaction.guild.roles.cache.get(applicantRoleId);
+        if (!applicantRole) {
+            await interaction.reply({ content: '❌ Booster applicant role not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (!interaction.member.roles.cache.has(applicantRoleId)) {
+            await interaction.member.roles.add(applicantRole);
+        }
+        if (clientRoleId && interaction.member.roles.cache.has(clientRoleId)) {
+            await interaction.member.roles.remove(clientRoleId).catch(() => {});
+        }
+
+        await interaction.reply({ content: '✅ You now have booster applicant access. Go to the booster application channel and submit your application.', flags: MessageFlags.Ephemeral });
+        return;
+    }
 
     // Booster application button
     if (customId === 'booster_application_button') {
-        const createBoosterApplicationModal = require('../modals/boosterApplicationModal');
-        const modal = createBoosterApplicationModal();
-        await interaction.showModal(modal);
+        if (!hasPermission(interaction.member, ['admin', 'management']) && !(applicantRoleId && interaction.member.roles.cache.has(applicantRoleId))) {
+            await interaction.reply({ content: '❌ Select the booster path first before applying.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const createBoosterApplicationProfileModal = require('../modals/boosterApplicationProfileModal');
+        await interaction.showModal(createBoosterApplicationProfileModal());
         return;
     }
 
@@ -86,6 +137,51 @@ async function handleButton(interaction) {
                 'Mythic+ Character Details'
             )
         );
+        return;
+    }
+
+    if (customId.startsWith('add_booster_application_character_')) {
+        const sessionId = customId.replace('add_booster_application_character_', '');
+        const session = boosterApplicationSessionStore.getSession(sessionId);
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.reply({ content: '❌ This booster application session has expired. Please start again.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const createBoosterApplicationCharacterModal = require('../modals/boosterApplicationCharacterModal');
+        await interaction.showModal(createBoosterApplicationCharacterModal(sessionId));
+        return;
+    }
+
+    if (customId.startsWith('submit_booster_application_')) {
+        await interaction.update({ content: '⏳ Submitting application...', components: [] });
+
+        const sessionId = customId.replace('submit_booster_application_', '');
+        const session = boosterApplicationSessionStore.getSession(sessionId);
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.editReply({ content: '❌ This booster application session has expired. Please start again.' });
+            return;
+        }
+
+        const result = await applicationSystem.processApplication(interaction.user.id, session.applicationData, session.characters);
+        boosterApplicationSessionStore.clearSession(sessionId);
+
+        if (!result.success) {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+            return;
+        }
+
+        await interaction.editReply({ content: '✅ Booster application submitted successfully. Management will review it shortly.' });
+        return;
+    }
+
+    if (customId.startsWith('cancel_booster_application_')) {
+        const sessionId = customId.replace('cancel_booster_application_', '');
+        const session = boosterApplicationSessionStore.getSession(sessionId);
+        if (session && session.userId === interaction.user.id) {
+            boosterApplicationSessionStore.clearSession(sessionId);
+        }
+        await interaction.update({ content: 'Booster application cancelled.', components: [] });
         return;
     }
 
@@ -176,6 +272,11 @@ async function handleButton(interaction) {
 
     // Create ticket button
     if (customId === 'create_ticket') {
+        if (!hasPermission(interaction.member, ['admin', 'management']) && !(clientRoleId && interaction.member.roles.cache.has(clientRoleId))) {
+            await interaction.reply({ content: '❌ Choose the client path first to create a service ticket.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('ticket_type_select')
             .setPlaceholder('Choose the type of boost you want')

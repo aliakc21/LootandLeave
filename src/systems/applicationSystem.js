@@ -3,6 +3,7 @@ const Database = require('../database/database');
 const logger = require('../utils/logger');
 const { fetchCharacterData } = require('../utils/wowApi');
 const { v4: uuidv4 } = require('../utils/uuid');
+const characterSystem = require('./characterSystem');
 
 let client = null;
 
@@ -11,29 +12,61 @@ function initialize(botClient) {
     logger.logInfo('Application System initialized');
 }
 
-// Process booster application
-async function processApplication(applicantId, characterName, characterRealm, experience) {
+async function processApplication(applicantId, applicationData, characters) {
     try {
-        // Fetch character data from Raider.IO
-        const characterData = await fetchCharacterData(characterName, characterRealm);
-
-        if (!characterData) {
-            return { success: false, message: 'Character not found on Raider.IO. Please verify the character name and realm.' };
+        if (!Array.isArray(characters) || characters.length === 0) {
+            return { success: false, message: 'Please add at least one character to your application.' };
         }
 
+        const validatedCharacters = [];
+        for (const entry of characters) {
+            const characterData = await fetchCharacterData(entry.characterName, entry.characterRealm);
+            if (!characterData) {
+                return { success: false, message: `Character not found on Raider.IO: ${entry.characterName}-${entry.characterRealm}` };
+            }
+
+            validatedCharacters.push({
+                characterName: entry.characterName,
+                characterRealm: entry.characterRealm,
+                class: characterData.class,
+                spec: characterData.spec,
+                itemLevel: characterData.itemLevel,
+                rioScore: characterData.rioScore,
+            });
+        }
+
+        const primaryCharacter = validatedCharacters[0];
         const applicationId = `app-${uuidv4().substring(0, 8)}`;
 
-        // Save application to database
         await Database.run(
-            `INSERT INTO booster_applications (application_id, applicant_id, character_name, character_realm, experience, rio_score, item_level, class_name, spec_name, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [applicationId, applicantId, characterName, characterRealm, experience, characterData.rioScore, characterData.itemLevel, characterData.class, characterData.spec, 'pending']
+            `INSERT INTO booster_applications (application_id, applicant_id, battletag, last_season_rio, previous_communities, years_playing, years_boosting, registered_characters, character_name, character_realm, experience, rio_score, item_level, class_name, spec_name, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                applicationId,
+                applicantId,
+                applicationData.battletag,
+                applicationData.lastSeasonRio,
+                applicationData.previousCommunities || null,
+                applicationData.yearsPlaying,
+                applicationData.yearsBoosting,
+                JSON.stringify(validatedCharacters),
+                primaryCharacter.characterName,
+                primaryCharacter.characterRealm,
+                null,
+                primaryCharacter.rioScore,
+                primaryCharacter.itemLevel,
+                primaryCharacter.class,
+                primaryCharacter.spec,
+                'pending'
+            ]
         );
 
-        // Post application to management channel
-        await postApplicationToChannel(applicationId, applicantId, characterName, characterRealm, experience, characterData);
-
-        logger.logAction('BOOSTER_APPLICATION_SUBMITTED', applicantId, { applicationId, characterName, characterRealm });
+        await postApplicationToChannel(applicationId, applicantId, applicationData, validatedCharacters);
+        logger.logAction('BOOSTER_APPLICATION_SUBMITTED', applicantId, {
+            applicationId,
+            battletag: applicationData.battletag,
+            characters: validatedCharacters.length,
+        });
 
         return { success: true, applicationId };
     } catch (error) {
@@ -42,22 +75,18 @@ async function processApplication(applicantId, characterName, characterRealm, ex
     }
 }
 
-// Post application to management channel
-async function postApplicationToChannel(applicationId, applicantId, characterName, characterRealm, experience, characterData) {
+async function postApplicationToChannel(applicationId, applicantId, applicationData, characters) {
     try {
         const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID);
-        const channelId = process.env.CHANNEL_APPLICATIONS;
-        
-        if (!channelId) {
-            logger.logWarning('CHANNEL_APPLICATIONS not configured');
+        const channel = guild.channels.cache.find(entry => entry.name === 'booster-applications');
+        if (!channel) {
+            logger.logWarning('Booster Applications channel not found');
             return;
         }
 
-        const channel = await guild.channels.fetch(channelId);
-        if (!channel) {
-            logger.logWarning('Applications channel not found');
-            return;
-        }
+        const characterLines = characters.map((entry, index) =>
+            `${index + 1}. ${entry.characterName}-${entry.characterRealm} | ${entry.class}${entry.spec ? ` (${entry.spec})` : ''} | iLvl ${entry.itemLevel} | RIO ${entry.rioScore}`
+        ).join('\n');
 
         const embed = new EmbedBuilder()
             .setTitle('📝 New Booster Application')
@@ -65,12 +94,12 @@ async function postApplicationToChannel(applicationId, applicantId, characterNam
             .addFields(
                 { name: '🆔 Application ID', value: `\`${applicationId}\``, inline: true },
                 { name: '👤 Applicant', value: `<@${applicantId}>`, inline: true },
-                { name: '🎮 Character', value: `${characterName}-${characterRealm}`, inline: true },
-                { name: '⚔️ Class', value: characterData.class || 'Unknown', inline: true },
-                { name: '🎯 Spec', value: characterData.spec || 'N/A', inline: true },
-                { name: '📊 Item Level', value: String(characterData.itemLevel || 0), inline: true },
-                { name: '🏆 RIO Score', value: String(characterData.rioScore || 0), inline: true },
-                { name: '📝 Experience', value: experience || 'Not provided', inline: false }
+                { name: '🏷️ BattleTag', value: applicationData.battletag, inline: true },
+                { name: '🏆 Last Season RIO', value: String(applicationData.lastSeasonRio), inline: true },
+                { name: '🎮 Years Playing', value: String(applicationData.yearsPlaying), inline: true },
+                { name: '💼 Years Boosting', value: String(applicationData.yearsBoosting), inline: true },
+                { name: '🌐 Previous Communities', value: applicationData.previousCommunities || 'None provided', inline: false },
+                { name: `🧙 Characters (${characters.length})`, value: characterLines.slice(0, 1024), inline: false }
             )
             .setColor(0x5865F2)
             .setTimestamp()
@@ -93,7 +122,6 @@ async function postApplicationToChannel(applicationId, applicantId, characterNam
     }
 }
 
-// Approve application
 async function approveApplication(applicationId, approvedBy) {
     try {
         const application = await Database.get(
@@ -114,19 +142,31 @@ async function approveApplication(applicationId, approvedBy) {
             ['approved', approvedBy, applicationId]
         );
 
-        // Assign booster role if configured
         const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID);
         const boosterRoleId = process.env.ROLE_BOOSTER;
+        const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
+        const member = await guild.members.fetch(application.applicant_id);
+
         if (boosterRoleId) {
-            const member = await guild.members.fetch(application.applicant_id);
-            const role = guild.roles.cache.get(boosterRoleId);
-            if (member && role) {
-                await member.roles.add(role);
+            const boosterRole = guild.roles.cache.get(boosterRoleId);
+            if (member && boosterRole) {
+                await member.roles.add(boosterRole);
             }
         }
 
-        logger.logAction('BOOSTER_APPLICATION_APPROVED', approvedBy, { applicationId, applicantId: application.applicant_id });
+        if (applicantRoleId) {
+            const applicantRole = guild.roles.cache.get(applicantRoleId);
+            if (member && applicantRole) {
+                await member.roles.remove(applicantRole);
+            }
+        }
 
+        const registeredCharacters = application.registered_characters ? JSON.parse(application.registered_characters) : [];
+        for (const entry of registeredCharacters) {
+            await characterSystem.registerCharacter(application.applicant_id, entry.characterName, entry.characterRealm);
+        }
+
+        logger.logAction('BOOSTER_APPLICATION_APPROVED', approvedBy, { applicationId, applicantId: application.applicant_id });
         return { success: true, message: 'Application approved successfully.' };
     } catch (error) {
         logger.logError(error, { context: 'APPROVE_APPLICATION', applicationId });
@@ -134,7 +174,6 @@ async function approveApplication(applicationId, approvedBy) {
     }
 }
 
-// Reject application
 async function rejectApplication(applicationId, rejectedBy) {
     try {
         const application = await Database.get(
@@ -155,8 +194,17 @@ async function rejectApplication(applicationId, rejectedBy) {
             ['rejected', rejectedBy, applicationId]
         );
 
-        logger.logAction('BOOSTER_APPLICATION_REJECTED', rejectedBy, { applicationId, applicantId: application.applicant_id });
+        const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID);
+        const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
+        if (applicantRoleId) {
+            const member = await guild.members.fetch(application.applicant_id);
+            const applicantRole = guild.roles.cache.get(applicantRoleId);
+            if (member && applicantRole) {
+                await member.roles.remove(applicantRole);
+            }
+        }
 
+        logger.logAction('BOOSTER_APPLICATION_REJECTED', rejectedBy, { applicationId, applicantId: application.applicant_id });
         return { success: true, message: 'Application rejected.' };
     } catch (error) {
         logger.logError(error, { context: 'REJECT_APPLICATION', applicationId });

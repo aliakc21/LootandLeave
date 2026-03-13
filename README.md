@@ -68,6 +68,7 @@ A professional World of Warcraft boosting service management bot for Discord. Th
 - `ROLE_ADVERTISER`: Advertiser role ID
 - `ROLE_RAID_LEADER`: Optional raid leader role ID for roster selection
 - `ROLE_BOOSTER`: Booster role ID
+- `ROLE_BOOSTER_APPLICANT`: Temporary role for users who chose the booster path but are still pending review
 - `ROLE_CLIENT`: Client role ID
 
 ### Getting Discord IDs

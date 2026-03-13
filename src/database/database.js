@@ -195,6 +195,12 @@ class Database {
                     id BIGSERIAL PRIMARY KEY,
                     application_id TEXT UNIQUE NOT NULL,
                     applicant_id TEXT NOT NULL,
+                    battletag TEXT,
+                    last_season_rio INTEGER,
+                    previous_communities TEXT,
+                    years_playing INTEGER,
+                    years_boosting INTEGER,
+                    registered_characters TEXT,
                     character_name TEXT NOT NULL,
                     character_realm TEXT NOT NULL,
                     experience TEXT,
@@ -320,6 +326,12 @@ class Database {
             `ALTER TABLE tickets ADD COLUMN settled_gold INTEGER`,
             `ALTER TABLE character_weekly_locks ADD COLUMN event_type TEXT DEFAULT 'raid'`,
             `ALTER TABLE character_weekly_locks ADD COLUMN lock_scope TEXT`,
+            `ALTER TABLE booster_applications ADD COLUMN battletag TEXT`,
+            `ALTER TABLE booster_applications ADD COLUMN last_season_rio INTEGER`,
+            `ALTER TABLE booster_applications ADD COLUMN previous_communities TEXT`,
+            `ALTER TABLE booster_applications ADD COLUMN years_playing INTEGER`,
+            `ALTER TABLE booster_applications ADD COLUMN years_boosting INTEGER`,
+            `ALTER TABLE booster_applications ADD COLUMN registered_characters TEXT`,
         ];
 
         for (const migration of migrations) {

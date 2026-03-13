@@ -21,6 +21,25 @@ async function getOrCreateTextChannel(guild, name, options = {}) {
     });
 }
 
+async function applyPermissions(channel, overwrites) {
+    await channel.permissionOverwrites.set(overwrites);
+}
+
+async function enforceRoleVisibilityScope(guild, roleIds, allowedChannelIds, allowedCategoryIds) {
+    for (const channel of guild.channels.cache.values()) {
+        const isAllowed = allowedChannelIds.has(channel.id) || (channel.parentId && allowedCategoryIds.has(channel.parentId)) || allowedCategoryIds.has(channel.id);
+        if (isAllowed) {
+            continue;
+        }
+
+        for (const roleId of roleIds.filter(Boolean)) {
+            await channel.permissionOverwrites.edit(roleId, {
+                ViewChannel: false,
+            }).catch(() => {});
+        }
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setup')
@@ -45,6 +64,8 @@ module.exports = {
             const clientCategoryId = process.env.CHANNEL_CLIENT_CATEGORY;
             const boosterCategoryId = process.env.CHANNEL_BOOSTER_CATEGORY;
             const boosterRoleId = process.env.ROLE_BOOSTER;
+            const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
+            const clientRoleId = process.env.ROLE_CLIENT;
             const managementRoleId = process.env.ROLE_MANAGEMENT;
 
             if (!clientCategoryId || !boosterCategoryId) {
@@ -52,18 +73,49 @@ module.exports = {
             }
 
             // Create welcome channel with ticket button
-            const welcomeChannel = await getOrCreateTextChannel(interaction.guild, 'welcome', {
-                permissionOverwrites: [
-                    {
-                        id: interaction.guild.roles.everyone.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-                    },
-                ],
-            });
+            const welcomeChannel = await getOrCreateTextChannel(interaction.guild, 'welcome');
+            await applyPermissions(welcomeChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                    deny: [PermissionFlagsBits.SendMessages],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
             const welcomeEmbed = new EmbedBuilder()
                 .setTitle('Welcome to LootandLeave')
-                .setDescription('Click the button below to create a ticket and get started!')
+                .setDescription('Choose your path first. Until you choose, you will only be able to use this welcome channel.')
+                .setColor(0x5865F2);
+
+            const clientChoiceButton = new ButtonBuilder()
+                .setCustomId('choose_role_client')
+                .setLabel('I Want To Buy A Service')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🎫');
+
+            const boosterChoiceButton = new ButtonBuilder()
+                .setCustomId('choose_role_booster')
+                .setLabel('I Want To Become A Booster')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('📝');
+
+            const onboardingRow = new ActionRowBuilder().addComponents(clientChoiceButton, boosterChoiceButton);
+
+            const clientPanelEmbed = new EmbedBuilder()
+                .setTitle('Client Services')
+                .setDescription('Clients can use the button below to create a ticket after choosing the client path.')
                 .setColor(0x5865F2);
 
             const ticketButton = new ButtonBuilder()
@@ -72,9 +124,68 @@ module.exports = {
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('🎫');
 
-            const actionRow = new ActionRowBuilder().addComponents(ticketButton);
+            await welcomeChannel.send({ embeds: [welcomeEmbed], components: [onboardingRow] });
+            await welcomeChannel.send({ embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] });
 
-            await welcomeChannel.send({ embeds: [welcomeEmbed], components: [actionRow] });
+            const clientCategory = await interaction.guild.channels.fetch(clientCategoryId);
+            const boosterCategory = await interaction.guild.channels.fetch(boosterCategoryId);
+            if (!clientCategory || !boosterCategory) {
+                throw new Error('Configured client or booster category could not be found.');
+            }
+
+            await applyPermissions(clientCategory, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                }] : []),
+                ...(clientRoleId ? [{
+                    id: clientRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(process.env.ROLE_ADVERTISER ? [{
+                    id: process.env.ROLE_ADVERTISER,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
+
+            await applyPermissions(boosterCategory, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(applicantRoleId ? [{
+                    id: applicantRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
             // Create admin-only event management channel with create event button
             const adminRoleId = process.env.ROLE_ADMIN;
@@ -111,31 +222,29 @@ module.exports = {
                 components: [new ActionRowBuilder().addComponents(createEventButton)]
             });
 
-            const registerChannel = await getOrCreateTextChannel(interaction.guild, 'register-characters', {
-                parent: boosterCategoryId,
-                permissionOverwrites: [
-                    {
-                        id: interaction.guild.roles.everyone.id,
-                        deny: [PermissionFlagsBits.ViewChannel],
-                    },
-                    {
-                        id: interaction.guild.members.me.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    },
-                    ...(adminRoleId ? [{
-                        id: adminRoleId,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    }] : []),
-                    ...(managementRoleId ? [{
-                        id: managementRoleId,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    }] : []),
-                    ...(boosterRoleId ? [{
-                        id: boosterRoleId,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    }] : []),
-                ],
-            });
+            const registerChannel = await getOrCreateTextChannel(interaction.guild, 'register-characters', { parent: boosterCategoryId });
+            await applyPermissions(registerChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
             const registerEmbed = new EmbedBuilder()
                 .setTitle('Register Characters')
@@ -153,31 +262,86 @@ module.exports = {
                 components: [new ActionRowBuilder().addComponents(registerButton)]
             });
 
-            // Create applications channel with application button
-            const applicationsChannelId = process.env.CHANNEL_APPLICATIONS;
-            if (isSnowflake(applicationsChannelId)) {
-                const applicationsChannel = await interaction.guild.channels.fetch(applicationsChannelId);
-                if (applicationsChannel) {
-                    const appEmbed = new EmbedBuilder()
-                        .setTitle('Become a Booster')
-                        .setDescription('Click the button below to apply as a booster!')
-                        .setColor(0x5865F2);
+            const boosterApplyChannel = await getOrCreateTextChannel(interaction.guild, 'booster-apply', { parent: boosterCategoryId });
+            await applyPermissions(boosterApplyChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(applicantRoleId ? [{
+                    id: applicantRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
-                    const appButton = new ButtonBuilder()
-                        .setCustomId('booster_application_button')
-                        .setLabel('Apply as Booster')
-                        .setStyle(ButtonStyle.Success)
-                        .setEmoji('📝');
+            const boosterApplicationsChannel = await getOrCreateTextChannel(interaction.guild, 'booster-applications', { parent: boosterCategoryId });
+            await applyPermissions(boosterApplicationsChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
-                    const appActionRow = new ActionRowBuilder().addComponents(appButton);
-                    await applicationsChannel.send({ embeds: [appEmbed], components: [appActionRow] });
-                }
-            } else if (applicationsChannelId) {
-                logger.logWarning('Skipping applications channel setup because CHANNEL_APPLICATIONS is not a valid Discord channel ID');
-            }
+            const appEmbed = new EmbedBuilder()
+                .setTitle('Become a Booster')
+                .setDescription('After choosing the booster path in welcome, click below to start your application.')
+                .setColor(0x5865F2);
+
+            const appButton = new ButtonBuilder()
+                .setCustomId('booster_application_button')
+                .setLabel('Apply as Booster')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('📝');
+
+            await boosterApplyChannel.send({ embeds: [appEmbed], components: [new ActionRowBuilder().addComponents(appButton)] });
+
+            const weekdayNames = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'M+']);
+            const boosterExtraCategories = new Set(
+                interaction.guild.channels.cache
+                    .filter(channel => channel.type === ChannelType.GuildCategory && weekdayNames.has(channel.name))
+                    .map(channel => channel.id)
+            );
+
+            await enforceRoleVisibilityScope(
+                interaction.guild,
+                [clientRoleId],
+                new Set([welcomeChannel.id]),
+                new Set([clientCategory.id])
+            );
+
+            await enforceRoleVisibilityScope(
+                interaction.guild,
+                [boosterRoleId, applicantRoleId],
+                new Set([welcomeChannel.id]),
+                new Set([boosterCategory.id, ...boosterExtraCategories])
+            );
 
             logger.logAction('SETUP_COMPLETED', interaction.user.id, { guildId: interaction.guild.id });
-            await interaction.editReply({ content: '✅ Setup completed! Welcome, event-management, and register-characters channels are ready.' });
+            await interaction.editReply({ content: '✅ Setup completed! Onboarding, booster application, and restricted access channels are ready.' });
         } catch (error) {
             logger.logError(error, { context: 'SETUP_COMMAND', userId: interaction.user.id });
             await interaction.editReply({ content: `❌ Error: ${error.message}` });

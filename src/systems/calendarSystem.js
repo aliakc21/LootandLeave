@@ -134,7 +134,7 @@ async function getAssignedClientCount(eventId) {
 async function getApprovedClientsForEvent(eventId) {
     try {
         return await Database.all(
-            `SELECT client_id, ticket_id, settled_gold
+            `SELECT client_id, ticket_id, settled_gold, client_character_name, client_character_realm
              FROM tickets
              WHERE event_id = ?
              AND boost_type IN ('raid', 'raid_request')
@@ -282,7 +282,6 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 { name: '🛡️ Min Item Level', value: String(minItemLevel), inline: true },
                 { name: '🏆 Min Raider.IO', value: String(minRioScore), inline: true },
                 { name: '👤 Client Slots', value: clientLimit === 0 ? 'Unlimited' : `0/${clientLimit}`, inline: true },
-                { name: '💰 Cuts', value: getEventCutText({ cut_treasury_rate: customCuts?.treasuryRate ?? null, cut_advertiser_rate: customCuts?.advertiserRate ?? null, cut_booster_rate: customCuts?.boosterRate ?? null }), inline: false },
                 { name: '👥 Roster', value: 'No characters selected yet', inline: false },
                 { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
             )
@@ -303,7 +302,12 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 .setCustomId(`cancel_event_${eventId}`)
                 .setLabel('❌ Cancel Event')
                 .setStyle(ButtonStyle.Danger)
-                .setEmoji('❌')
+                .setEmoji('❌'),
+            new ButtonBuilder()
+                .setCustomId(`view_event_admin_details_${eventId}`)
+                .setLabel('Admin Details')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji('🔎')
         );
 
         // Send detailed embed to channel
@@ -643,7 +647,6 @@ async function updateEventRoster(eventId) {
             { name: '🛡️ Min Item Level', value: String(event.min_item_level || 0), inline: true },
             { name: '🏆 Min Raider.IO', value: String(event.min_rio_score || 0), inline: true },
             { name: '👤 Client Slots', value: event.client_limit > 0 ? `${assignedClients}/${event.client_limit}` : `${assignedClients}/Unlimited`, inline: true },
-            { name: '💰 Cuts', value: getEventCutText(event), inline: false },
             { 
                 name: `👥 Roster (${rosterEntries.length})`, 
                 value: rosterEntries.length > 0 

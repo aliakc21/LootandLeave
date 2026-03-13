@@ -333,8 +333,6 @@ async function handleSelect(interaction) {
     }
 
     if (customId.startsWith('ticket_raid_role_select:')) {
-        await interaction.deferUpdate();
-
         const [, eventId, encodedClass] = customId.split(':');
         const requestedClass = decodeURIComponent(encodedClass || '');
         const requestedRole = interaction.values[0];
@@ -362,20 +360,13 @@ async function handleSelect(interaction) {
                 return;
             }
 
-            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
-                boost_type: 'raid',
-                event_id: raid.event_id,
-                boost_label: raid.name,
-                requested_class: requestedClass,
-                requested_role: requestedRole,
-                boost_amount: 1,
-                boost_scheduled_date: raid.scheduled_date,
-            });
-
-            await interaction.editReply({
-                content: `✅ Ticket created for raid request! ${result.channel}\nClass: **${requestedClass}** | Role: **${requestedRole}**`,
-                components: []
-            });
+            const createClientCharacterDetailsModal = require('../modals/clientCharacterDetailsModal');
+            await interaction.showModal(
+                createClientCharacterDetailsModal(
+                    `client_ticket_character_modal:raid:${raid.event_id}:${encodeURIComponent(requestedClass)}:${encodeURIComponent(requestedRole)}`,
+                    `Raid Details - ${raid.name}`
+                )
+            );
         } catch (error) {
             logger.logError(error, { context: 'TICKET_RAID_ROLE_SELECT', userId: interaction.user.id, eventId, requestedClass, requestedRole });
             await interaction.editReply({

@@ -11,6 +11,7 @@ const createApproveMythicTicketModal = require('../modals/approveMythicTicketMod
 const createCancelEventModal = require('../modals/cancelEventModal');
 const { MIDNIGHT_RAIDS } = require('../utils/contentCatalog');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
+const { formatCutRates, resolveEventCutRates } = require('../utils/cutConfig');
 
 // Check if user has permission
 function hasPermission(member, roles) {
@@ -67,6 +68,69 @@ async function handleButton(interaction) {
 
         const createRegisterCharactersModal = require('../modals/registerCharactersModal');
         await interaction.showModal(createRegisterCharactersModal(sessionId));
+        return;
+    }
+
+    if (customId.startsWith('open_mythic_client_character_modal_')) {
+        const sessionId = customId.replace('open_mythic_client_character_modal_', '');
+        const session = require('../utils/mplusRequestStore').getSession(sessionId);
+        if (!session || session.userId !== interaction.user.id) {
+            await interaction.reply({ content: '❌ This Mythic+ request session has expired. Please start again.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const createClientCharacterDetailsModal = require('../modals/clientCharacterDetailsModal');
+        await interaction.showModal(
+            createClientCharacterDetailsModal(
+                `client_ticket_character_modal:mythic_plus:${sessionId}`,
+                'Mythic+ Character Details'
+            )
+        );
+        return;
+    }
+
+    if (customId.startsWith('view_event_admin_details_')) {
+        if (!hasPermission(interaction.member, ['admin'])) {
+            await interaction.reply({ content: 'Only admins can view event cuts and client details.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const eventId = customId.replace('view_event_admin_details_', '');
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        if (!event) {
+            await interaction.editReply({ content: '❌ Event not found.' });
+            return;
+        }
+
+        const clients = await calendarSystem.getApprovedClientsForEvent(eventId);
+        const clientLines = [];
+        for (const client of clients) {
+            let memberName = `User ${client.client_id}`;
+            try {
+                const member = await interaction.guild.members.fetch(client.client_id);
+                memberName = member.displayName;
+            } catch {
+                // Keep fallback display.
+            }
+
+            const characterText = client.client_character_name && client.client_character_realm
+                ? `${client.client_character_name}-${client.client_character_realm}`
+                : 'No character provided';
+            clientLines.push(`- ${memberName} (<@${client.client_id}>) | ${characterText}${client.settled_gold ? ` | ${Number(client.settled_gold).toLocaleString()}g` : ''}`);
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle(`Admin Details - ${event.name}`)
+            .addFields(
+                { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
+                { name: '💰 Cuts', value: formatCutRates(resolveEventCutRates(event)), inline: false },
+                { name: `👤 Clients (${clients.length})`, value: clientLines.length > 0 ? clientLines.join('\n').slice(0, 1024) : 'No approved clients yet.', inline: false }
+            )
+            .setColor(0x5865F2)
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 

@@ -164,17 +164,17 @@ async function handleModal(interaction) {
                 return;
             }
 
-            const requestData = {
-                boost_type: 'mythic_plus',
-                boost_label: updatedSession.runCount === 1 ? updatedSession.runs[0].label : `${updatedSession.runCount} Mythic+ Runs`,
-                boost_key_level: updatedSession.runCount === 1 ? updatedSession.runs[0].keyLevel : null,
-                boost_amount: updatedSession.runCount,
-                boost_runs: JSON.stringify(updatedSession.runs),
-            };
-
-            const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, requestData);
-            mplusRequestStore.clearSession(sessionId);
-            await interaction.editReply({ content: `✅ Ticket created for Mythic+ request! ${result.channel}` });
+            await interaction.editReply({
+                content: `Saved run ${runNumber}/${updatedSession.runCount}: **${dungeon.label} +${keyLevel}**\nNow click below to enter your character name and server.`,
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`open_mythic_client_character_modal_${sessionId}`)
+                            .setLabel('Continue')
+                            .setStyle(ButtonStyle.Primary)
+                    )
+                ]
+            });
         } catch (error) {
             logger.logError(error, { context: 'MYTHIC_PLUS_TICKET_MODAL', userId: interaction.user.id });
             mplusRequestStore.clearSession(sessionId);
@@ -197,6 +197,8 @@ async function handleModal(interaction) {
                 boost_type: 'support',
                 boost_label: supportTopic,
                 boost_amount: 1,
+                client_character_name: interaction.fields.getTextInputValue('client_character_name').trim(),
+                client_character_realm: interaction.fields.getTextInputValue('client_character_realm').trim(),
             });
 
             await interaction.editReply({ content: `✅ Support ticket created! ${result.channel}` });
@@ -221,6 +223,8 @@ async function handleModal(interaction) {
                 boost_type: 'raid_request',
                 boost_label: raidRequest,
                 boost_amount: 1,
+                client_character_name: interaction.fields.getTextInputValue('client_character_name').trim(),
+                client_character_realm: interaction.fields.getTextInputValue('client_character_realm').trim(),
             });
 
             await interaction.editReply({ content: `✅ Raid request ticket created! ${result.channel}` });
@@ -421,6 +425,86 @@ async function handleModal(interaction) {
             await interaction.editReply({ content: `✅ ${result.message}` });
         } else {
             await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('client_ticket_character_modal:')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const [, boostType, contextId, encodedClass, encodedRole] = customId.split(':');
+        const clientCharacterName = interaction.fields.getTextInputValue('client_character_name').trim();
+        const clientCharacterRealm = interaction.fields.getTextInputValue('client_character_realm').trim();
+
+        if (!clientCharacterName || !clientCharacterRealm) {
+            await interaction.editReply({ content: '❌ Character name and server are required.' });
+            return;
+        }
+
+        try {
+            if (boostType === 'raid') {
+                const raid = await Database.get(
+                    `SELECT event_id, name, scheduled_date, status, client_limit FROM events WHERE event_id = ?`,
+                    [contextId]
+                );
+                if (!raid || raid.status !== 'open') {
+                    await interaction.editReply({ content: '❌ That raid is no longer available. Please start again.' });
+                    return;
+                }
+
+                const assignedClients = await calendarSystem.getAssignedClientCount(contextId);
+                if (raid.client_limit > 0 && assignedClients >= raid.client_limit) {
+                    await interaction.editReply({ content: '❌ That raid is already full. Please create a Raid Request ticket instead.' });
+                    return;
+                }
+
+                const requestedClass = decodeURIComponent(encodedClass || '');
+                const requestedRole = decodeURIComponent(encodedRole || '');
+                const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, {
+                    boost_type: 'raid',
+                    event_id: raid.event_id,
+                    boost_label: raid.name,
+                    requested_class: requestedClass,
+                    requested_role: requestedRole,
+                    client_character_name: clientCharacterName,
+                    client_character_realm: clientCharacterRealm,
+                    boost_amount: 1,
+                    boost_scheduled_date: raid.scheduled_date,
+                });
+
+                await interaction.editReply({
+                    content: `✅ Ticket created for raid request! ${result.channel}\nClass: **${requestedClass}** | Role: **${requestedRole}**\nCharacter: **${clientCharacterName}-${clientCharacterRealm}**`
+                });
+                return;
+            }
+
+            if (boostType === 'mythic_plus') {
+                const session = mplusRequestStore.getSession(contextId);
+                if (!session || session.userId !== interaction.user.id || session.guildId !== interaction.guild.id || session.runs.length === 0) {
+                    await interaction.editReply({ content: '❌ This Mythic+ request session expired. Please start again.' });
+                    return;
+                }
+
+                const requestData = {
+                    boost_type: 'mythic_plus',
+                    boost_label: session.runCount === 1 ? session.runs[0].label : `${session.runCount} Mythic+ Runs`,
+                    boost_key_level: session.runCount === 1 ? session.runs[0].keyLevel : null,
+                    boost_amount: session.runCount,
+                    boost_runs: JSON.stringify(session.runs),
+                    client_character_name: clientCharacterName,
+                    client_character_realm: clientCharacterRealm,
+                };
+
+                const result = await ticketSystem.createTicket(interaction.user.id, interaction.guild, requestData);
+                mplusRequestStore.clearSession(contextId);
+                await interaction.editReply({ content: `✅ Ticket created for Mythic+ request! ${result.channel}` });
+                return;
+            }
+
+            await interaction.editReply({ content: '❌ Invalid ticket flow.' });
+        } catch (error) {
+            logger.logError(error, { context: 'CLIENT_TICKET_CHARACTER_MODAL', userId: interaction.user.id, boostType, contextId });
+            await interaction.editReply({ content: '❌ An error occurred while creating your ticket.' });
         }
         return;
     }

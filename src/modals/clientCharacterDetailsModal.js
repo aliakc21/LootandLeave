@@ -1,17 +1,9 @@
 const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
-function createDedicatedRaidTicketModal() {
+function createClientCharacterDetailsModal(customId, title = 'Your Character Details') {
     const modal = new ModalBuilder()
-        .setCustomId('raid_request_ticket_modal')
-        .setTitle('Raid Request');
-
-    const raidInput = new TextInputBuilder()
-        .setCustomId('raid_request')
-        .setLabel('Raid Name / Details')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setPlaceholder('Example: Heroic Voidrift full clear for 2 clients')
-        .setMaxLength(700);
+        .setCustomId(customId)
+        .setTitle(title);
 
     const characterNameInput = new TextInputBuilder()
         .setCustomId('client_character_name')
@@ -21,7 +13,7 @@ function createDedicatedRaidTicketModal() {
         .setPlaceholder('e.g., Gawain')
         .setMaxLength(50);
 
-    const realmInput = new TextInputBuilder()
+    const characterRealmInput = new TextInputBuilder()
         .setCustomId('client_character_realm')
         .setLabel('Server / Realm')
         .setStyle(TextInputStyle.Short)
@@ -30,12 +22,11 @@ function createDedicatedRaidTicketModal() {
         .setMaxLength(50);
 
     modal.addComponents(
-        new ActionRowBuilder().addComponents(raidInput),
         new ActionRowBuilder().addComponents(characterNameInput),
-        new ActionRowBuilder().addComponents(realmInput)
+        new ActionRowBuilder().addComponents(characterRealmInput)
     );
 
     return modal;
 }
 
-module.exports = createDedicatedRaidTicketModal;
+module.exports = createClientCharacterDetailsModal;

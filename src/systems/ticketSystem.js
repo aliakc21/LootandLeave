@@ -43,6 +43,25 @@ function getTicketRequestSummary(ticket) {
     return 'General request';
 }
 
+function getClientCharacterSummary(ticket) {
+    if (!ticket?.client_character_name || !ticket?.client_character_realm) {
+        return null;
+    }
+
+    return `${ticket.client_character_name}-${ticket.client_character_realm}`;
+}
+
+function getCommonClientFields(ticket) {
+    const clientCharacter = getClientCharacterSummary(ticket);
+    if (!clientCharacter) {
+        return [];
+    }
+
+    return [
+        { name: '🎮 Client Character', value: clientCharacter, inline: true }
+    ];
+}
+
 function getTicketRequestFields(ticket) {
     if (ticket.boost_type === 'raid') {
         const fields = [
@@ -67,7 +86,7 @@ function getTicketRequestFields(ticket) {
             fields.push({ name: '🆔 Event ID', value: `\`${ticket.event_id}\``, inline: true });
         }
 
-        return fields;
+        return [...fields, ...getCommonClientFields(ticket)];
     }
 
     if (ticket.boost_type === 'mythic_plus') {
@@ -80,7 +99,8 @@ function getTicketRequestFields(ticket) {
                     name: '🗺️ Requested Runs',
                     value: runs.map((run, index) => `${index + 1}. ${run.label} +${run.keyLevel}`).join('\n').slice(0, 1024),
                     inline: false
-                }
+                },
+                ...getCommonClientFields(ticket)
             ];
         }
 
@@ -88,7 +108,8 @@ function getTicketRequestFields(ticket) {
             { name: '🎯 Boost Type', value: 'Mythic+', inline: true },
             { name: '🗺️ Dungeon', value: ticket.boost_label || 'Unknown dungeon', inline: true },
             { name: '🔑 Key Level', value: ticket.boost_key_level ? `+${ticket.boost_key_level}` : 'N/A', inline: true },
-            { name: '🔢 Amount', value: String(ticket.boost_amount || 1), inline: true }
+            { name: '🔢 Amount', value: String(ticket.boost_amount || 1), inline: true },
+            ...getCommonClientFields(ticket)
         ];
     }
 
@@ -102,13 +123,14 @@ function getTicketRequestFields(ticket) {
             fields.push({ name: '🆔 Assigned Event ID', value: `\`${ticket.event_id}\``, inline: true });
         }
 
-        return fields;
+        return [...fields, ...getCommonClientFields(ticket)];
     }
 
     if (ticket.boost_type === 'support') {
         return [
             { name: '🎯 Ticket Type', value: 'Support', inline: true },
-            { name: '📝 Request', value: ticket.boost_label || 'Representative request', inline: false }
+            { name: '📝 Request', value: ticket.boost_label || 'Representative request', inline: false },
+            ...getCommonClientFields(ticket)
         ];
     }
 
@@ -280,8 +302,8 @@ async function createTicket(clientId, guild, requestData = {}) {
 
         // Save ticket to database
         await Database.run(
-            `INSERT INTO tickets (ticket_id, client_id, channel_id, boost_type, event_id, boost_label, boost_runs, requested_class, requested_role, boost_key_level, boost_amount, boost_scheduled_date, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO tickets (ticket_id, client_id, channel_id, boost_type, event_id, boost_label, boost_runs, client_character_name, client_character_realm, requested_class, requested_role, boost_key_level, boost_amount, boost_scheduled_date, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 ticketId,
                 clientId,
@@ -290,6 +312,8 @@ async function createTicket(clientId, guild, requestData = {}) {
                 requestData.event_id || null,
                 requestData.boost_label || null,
                 requestData.boost_runs || null,
+                requestData.client_character_name || null,
+                requestData.client_character_realm || null,
                 requestData.requested_class || null,
                 requestData.requested_role || null,
                 requestData.boost_key_level || null,

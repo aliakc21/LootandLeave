@@ -11,9 +11,29 @@ function createSupportTicketModal() {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true)
         .setPlaceholder('Describe the issue or the representative help you need')
-        .setMaxLength(1000);
+        .setMaxLength(700);
 
-    modal.addComponents(new ActionRowBuilder().addComponents(topicInput));
+    const characterNameInput = new TextInputBuilder()
+        .setCustomId('client_character_name')
+        .setLabel('Character Name')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder('e.g., Gawain')
+        .setMaxLength(50);
+
+    const realmInput = new TextInputBuilder()
+        .setCustomId('client_character_realm')
+        .setLabel('Server / Realm')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder('e.g., Silvermoon')
+        .setMaxLength(50);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(topicInput),
+        new ActionRowBuilder().addComponents(characterNameInput),
+        new ActionRowBuilder().addComponents(realmInput)
+    );
 
     return modal;
 }

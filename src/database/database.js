@@ -196,7 +196,7 @@ class Database {
                     application_id TEXT UNIQUE NOT NULL,
                     applicant_id TEXT NOT NULL,
                     battletag TEXT,
-                    last_season_rio INTEGER,
+                    last_season_rio DOUBLE PRECISION,
                     previous_communities TEXT,
                     years_playing INTEGER,
                     years_boosting INTEGER,
@@ -204,8 +204,8 @@ class Database {
                     character_name TEXT NOT NULL,
                     character_realm TEXT NOT NULL,
                     experience TEXT,
-                    rio_score INTEGER,
-                    item_level INTEGER,
+                    rio_score DOUBLE PRECISION,
+                    item_level DOUBLE PRECISION,
                     class_name TEXT,
                     spec_name TEXT,
                     status TEXT DEFAULT 'pending',
@@ -223,8 +223,8 @@ class Database {
                     character_realm TEXT NOT NULL,
                     class_name TEXT,
                     spec_name TEXT,
-                    item_level INTEGER,
-                    rio_score INTEGER,
+                    item_level DOUBLE PRECISION,
+                    rio_score DOUBLE PRECISION,
                     last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     registered_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     locked_until TIMESTAMPTZ,
@@ -327,18 +327,23 @@ class Database {
             `ALTER TABLE character_weekly_locks ADD COLUMN event_type TEXT DEFAULT 'raid'`,
             `ALTER TABLE character_weekly_locks ADD COLUMN lock_scope TEXT`,
             `ALTER TABLE booster_applications ADD COLUMN battletag TEXT`,
-            `ALTER TABLE booster_applications ADD COLUMN last_season_rio INTEGER`,
+            `ALTER TABLE booster_applications ADD COLUMN last_season_rio DOUBLE PRECISION`,
             `ALTER TABLE booster_applications ADD COLUMN previous_communities TEXT`,
             `ALTER TABLE booster_applications ADD COLUMN years_playing INTEGER`,
             `ALTER TABLE booster_applications ADD COLUMN years_boosting INTEGER`,
             `ALTER TABLE booster_applications ADD COLUMN registered_characters TEXT`,
+            `ALTER TABLE booster_applications ALTER COLUMN last_season_rio TYPE DOUBLE PRECISION USING last_season_rio::DOUBLE PRECISION`,
+            `ALTER TABLE booster_applications ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
+            `ALTER TABLE booster_applications ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
+            `ALTER TABLE characters ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
+            `ALTER TABLE characters ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
         ];
 
         for (const migration of migrations) {
             try {
                 await executor.query(migration);
             } catch (error) {
-                if (error.code !== '42701') {
+                if (!['42701', '42P07', '42804'].includes(error.code)) {
                     console.warn('Migration warning:', error.message);
                 }
             }

@@ -63,7 +63,7 @@ async function handleButton(interaction) {
         if (applicantRoleId && interaction.member.roles.cache.has(applicantRoleId)) {
             await interaction.member.roles.remove(applicantRoleId).catch(() => {});
         }
-        await interaction.reply({ content: '✅ You now have client access. Use the ticket button in welcome to buy a service.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: '✅ You now have client access. Head to `#client-services` to choose your service type and open a ticket.', flags: MessageFlags.Ephemeral });
         return;
     }
 
@@ -86,7 +86,7 @@ async function handleButton(interaction) {
             await interaction.member.roles.remove(clientRoleId).catch(() => {});
         }
 
-        await interaction.reply({ content: '✅ You now have booster applicant access. Go to the booster application channel and submit your application.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: '✅ You now have booster applicant access. Head to `#booster-apply` and submit your application.', flags: MessageFlags.Ephemeral });
         return;
     }
 

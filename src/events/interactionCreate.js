@@ -30,7 +30,7 @@ module.exports = {
         if (interaction.isChatInputCommand()) {
             if (interaction.commandName !== 'setup' && !hasOnboardingAccess(interaction.member)) {
                 await interaction.reply({
-                    content: 'Please choose whether you are a client or a booster first in the welcome channel.',
+                    content: 'Please complete the onboarding choice first in `#start-here`.',
                     flags: MessageFlags.Ephemeral
                 });
                 return;

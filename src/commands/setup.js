@@ -46,6 +46,33 @@ async function enforceRoleVisibilityScope(guild, roleIds, allowedChannelIds, all
     }
 }
 
+async function enforceIntroOnlyAccess(guild, introChannelId, privilegedRoleIds = []) {
+    for (const channel of guild.channels.cache.values()) {
+        const everyoneOverwrite = channel.permissionOverwrites.cache.get(guild.roles.everyone.id);
+
+        if (channel.id === introChannelId) {
+            await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+                ViewChannel: true,
+                ReadMessageHistory: true,
+                SendMessages: false,
+            }).catch(() => {});
+            continue;
+        }
+
+        if (!everyoneOverwrite?.deny.has(PermissionFlagsBits.ViewChannel)) {
+            await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+                ViewChannel: false,
+            }).catch(() => {});
+        }
+
+        for (const roleId of privilegedRoleIds.filter(Boolean)) {
+            await channel.permissionOverwrites.edit(roleId, {
+                ViewChannel: true,
+            }).catch(() => {});
+        }
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setup')
@@ -111,9 +138,9 @@ module.exports = {
                 }
             }
 
-            // Create welcome channel with ticket button
-            const welcomeChannel = await getOrCreateTextChannel(interaction.guild, 'welcome');
-            await applyPermissions(welcomeChannel, [
+            // Create intro channel for first-time onboarding
+            const introChannel = await getOrCreateTextChannel(interaction.guild, 'start-here');
+            await applyPermissions(introChannel, [
                 {
                     id: interaction.guild.roles.everyone.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
@@ -131,30 +158,68 @@ module.exports = {
                     id: managementRoleId,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
                 }] : []),
+                ...(clientRoleId ? [{
+                    id: clientRoleId,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }] : []),
+                ...(applicantRoleId ? [{
+                    id: applicantRoleId,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }] : []),
             ]);
 
-            const welcomeEmbed = new EmbedBuilder()
-                .setTitle('Welcome to LootandLeave')
-                .setDescription('Choose your path first. Until you choose, you will only be able to use this welcome channel.')
+            const introEmbed = new EmbedBuilder()
+                .setTitle('LootandLeave Gateway')
+                .setDescription('Choose your path to unlock the server.\n\n`Client` opens access to service requests.\n`Booster` opens the application flow.\n\nUntil you choose successfully, every other channel stays hidden.')
                 .setColor(0x5865F2);
 
             const clientChoiceButton = new ButtonBuilder()
                 .setCustomId('choose_role_client')
-                .setLabel('I Want To Buy A Service')
+                .setLabel('Enter as Client')
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('🎫');
 
             const boosterChoiceButton = new ButtonBuilder()
                 .setCustomId('choose_role_booster')
-                .setLabel('I Want To Become A Booster')
+                .setLabel('Enter as Booster')
                 .setStyle(ButtonStyle.Success)
                 .setEmoji('📝');
 
             const onboardingRow = new ActionRowBuilder().addComponents(clientChoiceButton, boosterChoiceButton);
 
+            await introChannel.send({ embeds: [introEmbed], components: [onboardingRow] });
+
+            const clientServicesChannel = await getOrCreateTextChannel(interaction.guild, 'client-services', { parent: clientCategoryId });
+            await applyPermissions(clientServicesChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(clientRoleId ? [{
+                    id: clientRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
+
             const clientPanelEmbed = new EmbedBuilder()
                 .setTitle('Client Services')
-                .setDescription('Clients can use the button below to create a ticket after choosing the client path.')
+                .setDescription('Use the button below to choose your service type and open a ticket.')
                 .setColor(0x5865F2);
 
             const ticketButton = new ButtonBuilder()
@@ -163,8 +228,7 @@ module.exports = {
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('🎫');
 
-            await welcomeChannel.send({ embeds: [welcomeEmbed], components: [onboardingRow] });
-            await welcomeChannel.send({ embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] });
+            await clientServicesChannel.send({ embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] });
 
             await applyPermissions(clientCategory, [
                 {
@@ -340,7 +404,7 @@ module.exports = {
 
             const appEmbed = new EmbedBuilder()
                 .setTitle('Become a Booster')
-                .setDescription('After choosing the booster path in welcome, click below to start your application.')
+                .setDescription('After choosing the booster path in `start-here`, click below to start your application.')
                 .setColor(0x5865F2);
 
             const appButton = new ButtonBuilder()
@@ -361,19 +425,25 @@ module.exports = {
             await enforceRoleVisibilityScope(
                 interaction.guild,
                 [clientRoleId],
-                new Set([welcomeChannel.id]),
+                new Set(),
                 new Set([clientCategory.id])
             );
 
             await enforceRoleVisibilityScope(
                 interaction.guild,
                 [boosterRoleId, applicantRoleId],
-                new Set([welcomeChannel.id]),
+                new Set(),
                 new Set([boosterCategory.id, ...boosterExtraCategories])
             );
 
+            await enforceIntroOnlyAccess(
+                interaction.guild,
+                introChannel.id,
+                [adminRoleId, managementRoleId]
+            );
+
             logger.logAction('SETUP_COMPLETED', interaction.user.id, { guildId: interaction.guild.id });
-            await interaction.editReply({ content: '✅ Setup completed! Onboarding, booster application, and restricted access channels are ready.' });
+            await interaction.editReply({ content: '✅ Setup completed! The gated `start-here` onboarding, client services panel, booster application flow, and restricted access rules are ready.' });
         } catch (error) {
             logger.logError(error, { context: 'SETUP_COMMAND', userId: interaction.user.id });
             await interaction.editReply({ content: `❌ Error: ${error.message}` });

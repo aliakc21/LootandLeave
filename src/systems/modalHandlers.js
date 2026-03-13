@@ -95,7 +95,7 @@ async function handleModal(interaction) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const battletag = interaction.fields.getTextInputValue('battletag').trim();
-        const lastSeasonRio = parseInt(interaction.fields.getTextInputValue('last_season_rio').trim(), 10);
+        const lastSeasonRio = parseFloat(interaction.fields.getTextInputValue('last_season_rio').trim());
         const previousCommunities = interaction.fields.getTextInputValue('previous_communities').trim();
         const yearsPlaying = parseInt(interaction.fields.getTextInputValue('years_playing').trim(), 10);
         const yearsBoosting = parseInt(interaction.fields.getTextInputValue('years_boosting').trim(), 10);

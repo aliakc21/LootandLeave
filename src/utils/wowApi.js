@@ -1,6 +1,15 @@
 const axios = require('axios');
 const logger = require('./logger');
 
+function normalizeMetric(value, decimals = 1) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue)) {
+        return 0;
+    }
+
+    return Number(numericValue.toFixed(decimals));
+}
+
 // Fetch character data from Raider.IO API
 async function fetchCharacterData(characterName, realm) {
     try {
@@ -37,6 +46,9 @@ async function fetchCharacterData(characterName, realm) {
             if (data.gear) {
                 itemLevel = data.gear.item_level_equipped || data.gear.item_level_total || 0;
             }
+
+            rioScore = normalizeMetric(rioScore);
+            itemLevel = normalizeMetric(itemLevel);
             
             const className = data.class || 'Unknown';
             const specName = data.active_spec_name || 'N/A';

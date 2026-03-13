@@ -25,10 +25,19 @@ async function getOrCreateLogChannel(guild, channelName, channelType) {
         }
 
         // Create new channel if it doesn't exist
-        const logCategoryName = '📋 Logs';
+        const logCategoryName = 'Logs';
         let logCategory = guild.channels.cache.find(
             channel => channel.name === logCategoryName && channel.type === 4 // Category type
         );
+
+        if (!logCategory) {
+            logCategory = guild.channels.cache.find(
+                channel => channel.name === '📋 Logs' && channel.type === 4 // Legacy category name
+            );
+            if (logCategory && logCategory.name !== logCategoryName) {
+                await logCategory.setName(logCategoryName).catch(() => {});
+            }
+        }
 
         if (!logCategory) {
             logCategory = await guild.channels.create({

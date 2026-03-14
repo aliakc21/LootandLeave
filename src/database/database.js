@@ -318,6 +318,7 @@ class Database {
 
             await client.query(`CREATE INDEX IF NOT EXISTS idx_character_locks_booster ON character_weekly_locks (booster_id, locked_until)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_character_locks_character ON character_weekly_locks (character_name, character_realm, locked_until)`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_characters_booster_lower_name_realm ON characters (booster_id, LOWER(character_name), LOWER(character_realm))`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_event_applications_event ON event_applications (event_id, status)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_channel_visibility_rules_role ON channel_visibility_rules (role_id, target_type, target_id)`);
@@ -405,6 +406,7 @@ class Database {
             `ALTER TABLE booster_applications ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
+            `CREATE INDEX IF NOT EXISTS idx_characters_booster_lower_name_realm ON characters (booster_id, LOWER(character_name), LOWER(character_realm))`,
             `CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`,
             `CREATE INDEX IF NOT EXISTS idx_channel_visibility_rules_role ON channel_visibility_rules (role_id, target_type, target_id)`,
         ];

@@ -25,6 +25,18 @@ function isCharacterStale(lastUpdated, maxAgeMinutes = getCharacterRefreshInterv
     return Date.now() - updatedAt.getTime() > maxAgeMinutes * 60 * 1000;
 }
 
+async function findExistingCharacterCaseInsensitive(boosterId, characterName, characterRealm) {
+    return Database.get(
+        `SELECT *
+         FROM characters
+         WHERE booster_id = ?
+         AND LOWER(character_name) = LOWER(?)
+         AND LOWER(character_realm) = LOWER(?)
+         LIMIT 1`,
+        [boosterId, characterName, characterRealm]
+    );
+}
+
 // Register a character for a booster
 async function registerCharacter(boosterId, characterName, characterRealm) {
     try {
@@ -43,28 +55,30 @@ async function registerCharacter(boosterId, characterName, characterRealm) {
             logger.logWarning('Character data returned with zero values', { characterName, characterRealm, characterData });
         }
 
+        const resolvedCharacterName = characterData.characterName || characterName;
+        const resolvedCharacterRealm = characterData.realm || characterRealm;
+
         // Check if character already exists
-        const existing = await Database.get(
-            `SELECT * FROM characters WHERE booster_id = ? AND character_name = ? AND character_realm = ?`,
-            [boosterId, characterName, characterRealm]
-        );
+        const existing = await findExistingCharacterCaseInsensitive(boosterId, resolvedCharacterName, resolvedCharacterRealm);
 
         if (existing) {
-            // Update existing character
+            // Update the existing row and normalize casing to Raider.IO's canonical values.
             await Database.run(
-                `UPDATE characters SET class_name = ?, spec_name = ?, item_level = ?, rio_score = ?, last_updated = CURRENT_TIMESTAMP WHERE booster_id = ? AND character_name = ? AND character_realm = ?`,
-                [characterData.class, characterData.spec, characterData.itemLevel, characterData.rioScore, boosterId, characterName, characterRealm]
+                `UPDATE characters
+                 SET character_name = ?, character_realm = ?, class_name = ?, spec_name = ?, item_level = ?, rio_score = ?, last_updated = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [resolvedCharacterName, resolvedCharacterRealm, characterData.class, characterData.spec, characterData.itemLevel, characterData.rioScore, existing.id]
             );
-            logger.logAction('CHARACTER_UPDATED', boosterId, { characterName, characterRealm, itemLevel: characterData.itemLevel, rioScore: characterData.rioScore });
-            return { success: true, message: `Character updated: ${characterName}-${characterRealm} (iLvl: ${characterData.itemLevel}, RIO: ${characterData.rioScore})`, characterData };
+            logger.logAction('CHARACTER_UPDATED', boosterId, { characterName: resolvedCharacterName, characterRealm: resolvedCharacterRealm, itemLevel: characterData.itemLevel, rioScore: characterData.rioScore });
+            return { success: true, message: `Character updated: ${resolvedCharacterName}-${resolvedCharacterRealm} (iLvl: ${characterData.itemLevel}, RIO: ${characterData.rioScore})`, characterData };
         } else {
             // Insert new character
             await Database.run(
                 `INSERT INTO characters (booster_id, character_name, character_realm, class_name, spec_name, item_level, rio_score) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [boosterId, characterName, characterRealm, characterData.class, characterData.spec, characterData.itemLevel, characterData.rioScore]
+                [boosterId, resolvedCharacterName, resolvedCharacterRealm, characterData.class, characterData.spec, characterData.itemLevel, characterData.rioScore]
             );
-            logger.logAction('CHARACTER_REGISTERED', boosterId, { characterName, characterRealm, itemLevel: characterData.itemLevel, rioScore: characterData.rioScore });
-            return { success: true, message: `Character registered: ${characterName}-${characterRealm} (iLvl: ${characterData.itemLevel}, RIO: ${characterData.rioScore})`, characterData };
+            logger.logAction('CHARACTER_REGISTERED', boosterId, { characterName: resolvedCharacterName, characterRealm: resolvedCharacterRealm, itemLevel: characterData.itemLevel, rioScore: characterData.rioScore });
+            return { success: true, message: `Character registered: ${resolvedCharacterName}-${resolvedCharacterRealm} (iLvl: ${characterData.itemLevel}, RIO: ${characterData.rioScore})`, characterData };
         }
     } catch (error) {
         logger.logError(error, { context: 'REGISTER_CHARACTER', boosterId, characterName, characterRealm });

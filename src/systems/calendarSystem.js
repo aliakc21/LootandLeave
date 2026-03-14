@@ -118,7 +118,10 @@ function getRaidBoostTypeLabel(raidBoostType) {
 }
 
 function formatPermissionName(permission) {
-    return String(permission)
+    const permissionKey = Object.entries(PermissionFlagsBits)
+        .find(([, value]) => value === permission)?.[0] || String(permission);
+
+    return permissionKey
         .replace(/([a-z])([A-Z])/g, '$1 $2')
         .replace(/\b\w/g, char => char.toUpperCase());
 }

@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const buttonHandlers = require('../systems/buttonHandlers');
 const modalHandlers = require('../systems/modalHandlers');
 const selectHandlers = require('../systems/selectHandlers');
+const { scheduleEphemeralCleanup } = require('../utils/interactionCleanup');
 
 function hasOnboardingAccess(member) {
     if (!member) {
@@ -28,22 +29,22 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
         if (interaction.isChatInputCommand()) {
-            if (interaction.commandName !== 'setup' && !hasOnboardingAccess(interaction.member)) {
-                await interaction.reply({
-                    content: 'Please complete the onboarding choice first in `#start-here`.',
-                    flags: MessageFlags.Ephemeral
-                });
-                return;
-            }
-
-            const command = interaction.client.commands.get(interaction.commandName);
-
-            if (!command) {
-                logger.logWarning(`Command not found: ${interaction.commandName}`);
-                return;
-            }
-
             try {
+                if (interaction.commandName !== 'setup' && !hasOnboardingAccess(interaction.member)) {
+                    await interaction.reply({
+                        content: 'Please complete the onboarding choice first in `#start-here`.',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    return;
+                }
+
+                const command = interaction.client.commands.get(interaction.commandName);
+
+                if (!command) {
+                    logger.logWarning(`Command not found: ${interaction.commandName}`);
+                    return;
+                }
+
                 await command.execute(interaction);
             } catch (error) {
                 logger.logError(error, { context: 'COMMAND_EXECUTION', commandName: interaction.commandName, userId: interaction.user.id });
@@ -54,6 +55,8 @@ module.exports = {
                 } else {
                     await interaction.reply(errorMessage);
                 }
+            } finally {
+                scheduleEphemeralCleanup(interaction);
             }
         } else if (interaction.isButton()) {
             try {
@@ -67,6 +70,8 @@ module.exports = {
                 } else {
                     await interaction.reply(errorMessage);
                 }
+            } finally {
+                scheduleEphemeralCleanup(interaction);
             }
         } else if (interaction.isModalSubmit()) {
             try {
@@ -80,6 +85,8 @@ module.exports = {
                 } else {
                     await interaction.reply(errorMessage);
                 }
+            } finally {
+                scheduleEphemeralCleanup(interaction);
             }
         } else if (interaction.isStringSelectMenu()) {
             try {
@@ -93,6 +100,8 @@ module.exports = {
                 } else {
                     await interaction.reply(errorMessage);
                 }
+            } finally {
+                scheduleEphemeralCleanup(interaction);
             }
         }
     },

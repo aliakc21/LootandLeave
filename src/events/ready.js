@@ -1,7 +1,7 @@
 const logger = require('../utils/logger');
 
 module.exports = {
-    name: 'ready',
+    name: 'clientReady',
     once: true,
     execute(client) {
         logger.logInfo(`Bot is ready! Logged in as ${client.user.tag}`);

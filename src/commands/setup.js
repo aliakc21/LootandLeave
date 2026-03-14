@@ -546,7 +546,7 @@ module.exports = {
                 [adminRoleId, managementRoleId]
             );
 
-            await logChannelSystem.ensureLogInfrastructure(interaction.guild);
+            const logSetupResults = await logChannelSystem.ensureLogInfrastructure(interaction.guild);
 
             const savedVisibilityRules = await channelVisibilitySystem.getVisibilityRulesForGuild(interaction.guild);
             for (const rule of savedVisibilityRules) {
@@ -564,7 +564,12 @@ module.exports = {
             }
 
             logger.logAction('SETUP_COMPLETED', interaction.user.id, { guildId: interaction.guild.id });
-            await interaction.editReply({ content: '✅ Setup completed! The gated `start-here` onboarding, client services panel, booster application flow, and restricted access rules are ready.' });
+            const failedLogRepairs = logSetupResults.filter(result => !result.success);
+            const setupSummary = failedLogRepairs.length === 0
+                ? '✅ Setup completed! The gated `start-here` onboarding, client services panel, booster application flow, and restricted access rules are ready.'
+                : `⚠️ Setup completed with log warnings. The bot could not repair these existing log channels: ${failedLogRepairs.map(result => `\`${result.channelName}\``).join(', ')}. Please make sure the bot role can view/manage those channels or move/delete the old inaccessible copies, then run \`/setup\` again.`;
+
+            await interaction.editReply({ content: setupSummary });
         } catch (error) {
             logger.logError(error, { context: 'SETUP_COMMAND', userId: interaction.user.id });
             await interaction.editReply({ content: `❌ Error: ${error.message}` });

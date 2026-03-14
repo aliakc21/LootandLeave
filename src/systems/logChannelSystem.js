@@ -98,8 +98,21 @@ async function getOrCreateLogChannel(guild, channelName, channelType) {
         const permissionOverwrites = buildLogPermissionOverwrites(guild, { includeAdvertiser: true });
 
         if (existingChannel) {
+            const botPermissions = existingChannel.permissionsFor(guild.members.me);
+            const canManageExistingChannel = Boolean(
+                botPermissions?.has('ViewChannel') && botPermissions?.has('ManageChannels')
+            );
+
+            if (!canManageExistingChannel) {
+                const error = new Error(`Missing access to manage existing log channel \`${channelName}\`.`);
+                error.code = 'LOG_CHANNEL_INACCESSIBLE';
+                error.channelId = existingChannel.id;
+                error.categoryId = existingChannel.parentId || null;
+                throw error;
+            }
+
             if (existingChannel.parentId !== logCategory.id) {
-                await existingChannel.setParent(logCategory.id, { lockPermissions: false }).catch(() => {});
+                await existingChannel.setParent(logCategory.id, { lockPermissions: false });
             }
             await existingChannel.permissionOverwrites.set(permissionOverwrites);
             return existingChannel;
@@ -395,9 +408,25 @@ async function logBoosterReceipt(event, boosterId, characterName, characterRealm
 }
 
 async function ensureLogInfrastructure(guild) {
-    await getOrCreateLogChannel(guild, 'event-logs', 0);
-    await getOrCreateLogChannel(guild, 'customer-logs', 0);
-    await getOrCreateLogChannel(guild, 'booster-logs', 0);
+    const results = [];
+    for (const channelName of ['event-logs', 'customer-logs', 'booster-logs']) {
+        try {
+            await getOrCreateLogChannel(guild, channelName, 0);
+            results.push({ channelName, success: true });
+        } catch (error) {
+            logger.logError(error, { context: 'ENSURE_LOG_INFRASTRUCTURE', channelName });
+            results.push({
+                channelName,
+                success: false,
+                errorCode: error.code || 'UNKNOWN',
+                message: error.message,
+                channelId: error.channelId || null,
+                categoryId: error.categoryId || null,
+            });
+        }
+    }
+
+    return results;
 }
 
 module.exports = {

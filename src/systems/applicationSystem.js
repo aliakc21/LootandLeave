@@ -108,12 +108,14 @@ async function postApplicationToChannel(applicationId, applicantId, applicationD
         const actionRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`approve_application_${applicationId}`)
-                .setLabel('✅ Approve')
-                .setStyle(ButtonStyle.Success),
+                .setLabel('Approve')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('✅'),
             new ButtonBuilder()
                 .setCustomId(`reject_application_${applicationId}`)
-                .setLabel('❌ Reject')
+                .setLabel('Reject')
                 .setStyle(ButtonStyle.Danger)
+                .setEmoji('❌')
         );
 
         await channel.send({ embeds: [embed], components: [actionRow] });

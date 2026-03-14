@@ -400,12 +400,12 @@ function buildEventActionRow(eventId) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`end_event_${eventId}`)
-            .setLabel('✅ End Event')
+            .setLabel('End Event')
             .setStyle(ButtonStyle.Success)
             .setEmoji('✅'),
         new ButtonBuilder()
             .setCustomId(`cancel_event_${eventId}`)
-            .setLabel('❌ Cancel Event')
+            .setLabel('Cancel Event')
             .setStyle(ButtonStyle.Danger)
             .setEmoji('❌'),
         new ButtonBuilder()

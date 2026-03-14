@@ -383,7 +383,7 @@ async function logBoosterReceipt(event, boosterId, characterName, characterRealm
         const buttonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`complete_payment_${payoutIdSafe}_${boosterId}`)
-                .setLabel('✅ Mark as Paid')
+                .setLabel('Mark as Paid')
                 .setStyle(ButtonStyle.Success)
                 .setEmoji('✅')
         );

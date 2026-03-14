@@ -33,6 +33,52 @@ function formatPermissionName(permission) {
         .replace(/\b\w/g, char => char.toUpperCase());
 }
 
+function extractCustomIds(message) {
+    const customIds = [];
+    for (const row of message.components || []) {
+        for (const component of row.components || []) {
+            if (component.customId) {
+                customIds.push(component.customId);
+            }
+        }
+    }
+    return customIds;
+}
+
+async function deleteExistingManagedPanelMessages(channel, botUserId, managedCustomIds) {
+    let before;
+    let scanned = 0;
+
+    while (scanned < 500) {
+        const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+        if (batch.size === 0) {
+            break;
+        }
+
+        for (const message of batch.values()) {
+            if (message.author?.id !== botUserId) {
+                continue;
+            }
+
+            const messageCustomIds = extractCustomIds(message);
+            if (messageCustomIds.some(customId => managedCustomIds.has(customId))) {
+                await message.delete().catch(() => {});
+            }
+        }
+
+        scanned += batch.size;
+        before = batch.last()?.id;
+        if (batch.size < 100) {
+            break;
+        }
+    }
+}
+
+async function refreshManagedPanelMessage(channel, botUserId, managedCustomIds, payload) {
+    await deleteExistingManagedPanelMessages(channel, botUserId, managedCustomIds);
+    return channel.send(payload);
+}
+
 async function enforceRoleVisibilityScope(guild, roleIds, allowedChannelIds, allowedCategoryIds) {
     for (const channel of guild.channels.cache.values()) {
         const isAllowed = allowedChannelIds.has(channel.id) || (channel.parentId && allowedCategoryIds.has(channel.parentId)) || allowedCategoryIds.has(channel.id);
@@ -193,7 +239,12 @@ module.exports = {
 
             const onboardingRow = new ActionRowBuilder().addComponents(clientChoiceButton, boosterChoiceButton);
 
-            await introChannel.send({ embeds: [introEmbed], components: [onboardingRow] });
+            await refreshManagedPanelMessage(
+                introChannel,
+                interaction.client.user.id,
+                new Set(['choose_role_client', 'choose_role_booster']),
+                { embeds: [introEmbed], components: [onboardingRow] }
+            );
 
             const clientServicesChannel = await getOrCreateTextChannel(interaction.guild, 'client-services', { parent: clientCategoryId });
             await applyPermissions(clientServicesChannel, [
@@ -230,7 +281,12 @@ module.exports = {
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('🎫');
 
-            await clientServicesChannel.send({ embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] });
+            await refreshManagedPanelMessage(
+                clientServicesChannel,
+                interaction.client.user.id,
+                new Set(['create_ticket']),
+                { embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] }
+            );
 
             await applyPermissions(clientCategory, [
                 {
@@ -315,10 +371,15 @@ module.exports = {
                 .setStyle(ButtonStyle.Success)
                 .setEmoji('📅');
 
-            await eventManagementChannel.send({
-                embeds: [eventPanelEmbed],
-                components: [new ActionRowBuilder().addComponents(createEventButton)]
-            });
+            await refreshManagedPanelMessage(
+                eventManagementChannel,
+                interaction.client.user.id,
+                new Set(['create_event_panel']),
+                {
+                    embeds: [eventPanelEmbed],
+                    components: [new ActionRowBuilder().addComponents(createEventButton)]
+                }
+            );
 
             const registerChannel = await getOrCreateTextChannel(interaction.guild, 'register-characters', { parent: boosterCategoryId });
             await applyPermissions(registerChannel, [
@@ -355,10 +416,15 @@ module.exports = {
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('🧙');
 
-            await registerChannel.send({
-                embeds: [registerEmbed],
-                components: [new ActionRowBuilder().addComponents(registerButton)]
-            });
+            await refreshManagedPanelMessage(
+                registerChannel,
+                interaction.client.user.id,
+                new Set(['open_register_characters_modal']),
+                {
+                    embeds: [registerEmbed],
+                    components: [new ActionRowBuilder().addComponents(registerButton)]
+                }
+            );
 
             const boosterApplyChannel = await getOrCreateTextChannel(interaction.guild, 'booster-apply', { parent: boosterCategoryId });
             await applyPermissions(boosterApplyChannel, [
@@ -443,7 +509,12 @@ module.exports = {
                 .setStyle(ButtonStyle.Success)
                 .setEmoji('📝');
 
-            await boosterApplyChannel.send({ embeds: [appEmbed], components: [new ActionRowBuilder().addComponents(appButton)] });
+            await refreshManagedPanelMessage(
+                boosterApplyChannel,
+                interaction.client.user.id,
+                new Set(['booster_application_button']),
+                { embeds: [appEmbed], components: [new ActionRowBuilder().addComponents(appButton)] }
+            );
 
             const weekdayNames = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'M+']);
             const boosterExtraCategories = new Set(

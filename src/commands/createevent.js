@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const calendarSystem = require('../systems/calendarSystem');
 const logger = require('../utils/logger');
-const { MIDNIGHT_RAIDS, RAID_DIFFICULTIES, buildRaidEventName } = require('../utils/contentCatalog');
+const { MIDNIGHT_RAIDS, RAID_DIFFICULTIES, RAID_BOOST_TYPES, buildRaidEventName, findRaidBoostTypeById } = require('../utils/contentCatalog');
 const { parseCutConfig, formatCutRates } = require('../utils/cutConfig');
 
 module.exports = {
@@ -18,6 +18,11 @@ module.exports = {
                 .setDescription('Raid difficulty')
                 .setRequired(true)
                 .addChoices(...RAID_DIFFICULTIES.map(difficulty => ({ name: difficulty.label, value: difficulty.id }))))
+        .addStringOption(option =>
+            option.setName('boost_type')
+                .setDescription('Raid boost type')
+                .setRequired(true)
+                .addChoices(...RAID_BOOST_TYPES.map(boostType => ({ name: boostType.label, value: boostType.id }))))
         .addStringOption(option =>
             option.setName('date')
                 .setDescription('Date (format: DD-MM-YYYY)')
@@ -66,6 +71,7 @@ module.exports = {
         try {
             const raidId = interaction.options.getString('raid');
             const difficultyId = interaction.options.getString('difficulty');
+            const raidBoostType = interaction.options.getString('boost_type');
             const eventName = buildRaidEventName(raidId, difficultyId);
             const description = interaction.options.getString('description') || '';
             const datePart = interaction.options.getString('date');
@@ -78,6 +84,10 @@ module.exports = {
 
             if (!eventName) {
                 return interaction.editReply({ content: '❌ Invalid raid or difficulty selection.' });
+            }
+            const boostType = findRaidBoostTypeById(raidBoostType);
+            if (!boostType) {
+                return interaction.editReply({ content: '❌ Invalid raid boost type selected.' });
             }
 
             // Parse date/time (DD-MM-YYYY + HH:MM)
@@ -101,11 +111,11 @@ module.exports = {
                 scheduledDate,
                 interaction.user.id,
                 interaction.guild,
-                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId, customCuts }
+                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId, customCuts, raidBoostType }
             );
             
             await interaction.editReply({ 
-                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Category:** ${new Date(scheduledDate).toLocaleDateString('en-US', { weekday: 'long' })}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Client Limit:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${customCuts ? formatCutRates(customCuts) : 'Default env/config cuts'}` 
+                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Category:** ${new Date(scheduledDate).toLocaleDateString('en-US', { weekday: 'long' })}\n**Boost Type:** ${boostType.label}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Client Limit:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${customCuts ? formatCutRates(customCuts) : 'Default env/config cuts'}` 
             });
         } catch (error) {
             logger.logError(error, { context: 'CREATE_EVENT_COMMAND', userId: interaction.user.id });

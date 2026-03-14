@@ -1,5 +1,7 @@
 const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const logger = require('../utils/logger');
+const channelVisibilitySystem = require('../systems/channelVisibilitySystem');
+const logChannelSystem = require('../systems/logChannelSystem');
 
 function isSnowflake(value) {
     return typeof value === 'string' && /^\d{17,20}$/.test(value);
@@ -450,18 +452,21 @@ module.exports = {
                     .map(channel => channel.id)
             );
 
+            const clientExtraVisibility = await channelVisibilitySystem.getAllowedScopesForRoles(interaction.guild, [clientRoleId]);
+            const boosterExtraVisibility = await channelVisibilitySystem.getAllowedScopesForRoles(interaction.guild, [boosterRoleId, applicantRoleId]);
+
             await enforceRoleVisibilityScope(
                 interaction.guild,
                 [clientRoleId],
-                new Set(),
-                new Set([clientCategory.id])
+                clientExtraVisibility.allowedChannelIds,
+                new Set([clientCategory.id, ...clientExtraVisibility.allowedCategoryIds])
             );
 
             await enforceRoleVisibilityScope(
                 interaction.guild,
                 [boosterRoleId, applicantRoleId],
-                new Set(),
-                new Set([boosterCategory.id, ...boosterExtraCategories])
+                boosterExtraVisibility.allowedChannelIds,
+                new Set([boosterCategory.id, ...boosterExtraCategories, ...boosterExtraVisibility.allowedCategoryIds])
             );
 
             await enforceIntroOnlyAccess(
@@ -469,6 +474,23 @@ module.exports = {
                 introChannel.id,
                 [adminRoleId, managementRoleId]
             );
+
+            await logChannelSystem.ensureLogInfrastructure(interaction.guild);
+
+            const savedVisibilityRules = await channelVisibilitySystem.getVisibilityRulesForGuild(interaction.guild);
+            for (const rule of savedVisibilityRules) {
+                const targetChannel = interaction.guild.channels.cache.get(rule.target_id);
+
+                if (!targetChannel) {
+                    continue;
+                }
+
+                await channelVisibilitySystem.applyVisibilityRule(interaction.guild, rule.role_id, targetChannel, {
+                    allowView: rule.allow_view,
+                    allowSend: rule.allow_send,
+                    allowHistory: rule.allow_history,
+                });
+            }
 
             logger.logAction('SETUP_COMPLETED', interaction.user.id, { guildId: interaction.guild.id });
             await interaction.editReply({ content: '✅ Setup completed! The gated `start-here` onboarding, client services panel, booster application flow, and restricted access rules are ready.' });

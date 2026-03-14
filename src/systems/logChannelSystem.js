@@ -7,6 +7,56 @@ const path = require('path');
 
 let client = null;
 
+function buildLogPermissionOverwrites(guild, options = {}) {
+    const adminRole = process.env.ROLE_ADMIN;
+    const managementRole = process.env.ROLE_MANAGEMENT;
+    const advertiserRole = process.env.ROLE_ADVERTISER;
+    const includeAdvertiser = Boolean(options.includeAdvertiser);
+
+    const permissionOverwrites = [
+        {
+            id: guild.roles.everyone.id,
+            deny: ['ViewChannel'],
+        },
+        {
+            id: guild.members.me.id,
+            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages', 'ManageChannels'],
+        },
+    ];
+
+    if (adminRole) {
+        const role = guild.roles.cache.get(adminRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+            });
+        }
+    }
+
+    if (managementRole) {
+        const role = guild.roles.cache.get(managementRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+            });
+        }
+    }
+
+    if (includeAdvertiser && advertiserRole) {
+        const role = guild.roles.cache.get(advertiserRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: ['ViewChannel', 'ReadMessageHistory'],
+            });
+        }
+    }
+
+    return permissionOverwrites;
+}
+
 function initialize(botClient) {
     client = botClient;
     logger.logInfo('Log Channel System initialized');
@@ -19,10 +69,6 @@ async function getOrCreateLogChannel(guild, channelName, channelType) {
         const existingChannel = guild.channels.cache.find(
             channel => channel.name === channelName && channel.type === channelType
         );
-
-        if (existingChannel) {
-            return existingChannel;
-        }
 
         // Create new channel if it doesn't exist
         const logCategoryName = 'Logs';
@@ -43,62 +89,20 @@ async function getOrCreateLogChannel(guild, channelName, channelType) {
             logCategory = await guild.channels.create({
                 name: logCategoryName,
                 type: 4, // Category
-                permissionOverwrites: [
-                    {
-                        id: guild.roles.everyone.id,
-                        deny: ['ViewChannel'],
-                    },
-                    {
-                        id: guild.members.me.id,
-                        allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages', 'ManageChannels'],
-                    },
-                ],
+                permissionOverwrites: buildLogPermissionOverwrites(guild),
             });
         }
 
-        // Get role IDs for permissions
-        const adminRole = process.env.ROLE_ADMIN;
-        const managementRole = process.env.ROLE_MANAGEMENT;
-        const advertiserRole = process.env.ROLE_ADVERTISER;
+        await logCategory.permissionOverwrites.set(buildLogPermissionOverwrites(guild));
 
-        const permissionOverwrites = [
-            {
-                id: guild.roles.everyone.id,
-                deny: ['ViewChannel'],
-            },
-            {
-                id: guild.members.me.id,
-                allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages'],
-            },
-        ];
+        const permissionOverwrites = buildLogPermissionOverwrites(guild, { includeAdvertiser: true });
 
-        // Add management roles
-        if (adminRole) {
-            const role = guild.roles.cache.get(adminRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
-                });
+        if (existingChannel) {
+            if (existingChannel.parentId !== logCategory.id) {
+                await existingChannel.setParent(logCategory.id, { lockPermissions: false }).catch(() => {});
             }
-        }
-        if (managementRole) {
-            const role = guild.roles.cache.get(managementRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
-                });
-            }
-        }
-        if (advertiserRole) {
-            const role = guild.roles.cache.get(advertiserRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: ['ViewChannel', 'ReadMessageHistory'],
-                });
-            }
+            await existingChannel.permissionOverwrites.set(permissionOverwrites);
+            return existingChannel;
         }
 
         const newChannel = await guild.channels.create({
@@ -390,7 +394,14 @@ async function logBoosterReceipt(event, boosterId, characterName, characterRealm
     }
 }
 
+async function ensureLogInfrastructure(guild) {
+    await getOrCreateLogChannel(guild, 'event-logs', 0);
+    await getOrCreateLogChannel(guild, 'customer-logs', 0);
+    await getOrCreateLogChannel(guild, 'booster-logs', 0);
+}
+
 module.exports = {
+    ensureLogInfrastructure,
     initialize,
     logEvent,
     logCustomerTicket,

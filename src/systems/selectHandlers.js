@@ -3,7 +3,7 @@ const Database = require('../database/database');
 const ticketSystem = require('./ticketSystem');
 const calendarSystem = require('./calendarSystem');
 const logger = require('../utils/logger');
-const { RAID_DIFFICULTIES, MIDNIGHT_DUNGEONS, findRaidById, findDifficultyById } = require('../utils/contentCatalog');
+const { RAID_DIFFICULTIES, RAID_BOOST_TYPES, MIDNIGHT_DUNGEONS, findRaidById, findDifficultyById, findRaidBoostTypeById } = require('../utils/contentCatalog');
 
 function hasAdminPermission(member) {
     if (member.permissions.has('Administrator')) {
@@ -69,6 +69,7 @@ async function resetManagerCharacterSelectionMessage(message, eventId, boosterId
         {
             eventType: event.event_type,
             eventDifficulty: event.event_difficulty,
+            raidBoostType: event.raid_boost_type,
         }
     );
 
@@ -134,13 +135,14 @@ async function handleSelect(interaction) {
                             const timeText = Number.isNaN(scheduledAt.getTime())
                                 ? 'Scheduled soon'
                                 : scheduledAt.toLocaleString();
+                            const boostTypeText = findRaidBoostTypeById(raid.raid_boost_type)?.label || 'VIP';
                             const clientText = raid.client_limit > 0
                                 ? `Clients ${raid.assigned_clients}/${raid.client_limit}`
                                 : `Clients ${raid.assigned_clients}/Unlimited`;
 
                             return {
                                 label: raid.name.substring(0, 100),
-                                description: `${timeText} | ${clientText}`.substring(0, 100),
+                                description: `${timeText} | ${boostTypeText} | ${clientText}`.substring(0, 100),
                                 value: raid.event_id,
                             };
                         })
@@ -237,13 +239,42 @@ async function handleSelect(interaction) {
         const difficultyId = interaction.values[0];
         const raid = findRaidById(raidId);
         const difficulty = findDifficultyById(difficultyId);
+        const boostTypeMenu = new StringSelectMenuBuilder()
+            .setCustomId(`admin_event_boost_type_select:${raidId}:${difficultyId}`)
+            .setPlaceholder('Choose the raid boost type')
+            .addOptions(
+                RAID_BOOST_TYPES.map(boostType => ({
+                    label: boostType.label,
+                    value: boostType.id,
+                }))
+            );
+
+        await interaction.update({
+            content: `Selected raid: **${raid ? raid.label : raidId}**\nDifficulty: **${difficulty ? difficulty.label : difficultyId}**\nNow choose the raid boost type:`,
+            components: [new ActionRowBuilder().addComponents(boostTypeMenu)]
+        });
+        return;
+    }
+
+    if (customId.startsWith('admin_event_boost_type_select:')) {
+        if (!hasAdminPermission(interaction.member)) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const [, raidId, difficultyId] = customId.split(':');
+        const boostTypeId = interaction.values[0];
+        const raid = findRaidById(raidId);
+        const difficulty = findDifficultyById(difficultyId);
+        const boostType = findRaidBoostTypeById(boostTypeId);
         const createEventPanelModal = require('../modals/createEventPanelModal');
 
         await interaction.showModal(
             createEventPanelModal(
                 raidId,
                 difficultyId,
-                `${raid ? raid.label : 'Raid'} - ${difficulty ? difficulty.label : 'Difficulty'}`
+                boostTypeId,
+                `${raid ? raid.label : 'Raid'} - ${difficulty ? difficulty.label : 'Difficulty'} - ${boostType ? boostType.label : 'Boost Type'}`
             )
         );
         return;

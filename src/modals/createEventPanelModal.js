@@ -1,8 +1,8 @@
 const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
-function createEventPanelModal(raidId, difficultyId, title) {
+function createEventPanelModal(raidId, difficultyId, boostTypeId, title) {
     const modal = new ModalBuilder()
-        .setCustomId(`create_event_panel_modal:${raidId}:${difficultyId}`)
+        .setCustomId(`create_event_panel_modal:${raidId}:${difficultyId}:${boostTypeId}`)
         .setTitle(title);
 
     const dateInput = new TextInputBuilder()

@@ -3,9 +3,10 @@ const calendarSystem = require('./calendarSystem');
 const applicationSystem = require('./applicationSystem');
 const characterSystem = require('./characterSystem');
 const ticketSystem = require('./ticketSystem');
+const Database = require('../database/database');
 const logger = require('../utils/logger');
 const { EmbedBuilder } = require('discord.js');
-const { buildRaidEventName } = require('../utils/contentCatalog');
+const { buildRaidEventName, findRaidBoostTypeById } = require('../utils/contentCatalog');
 const { MIDNIGHT_DUNGEONS } = require('../utils/contentCatalog');
 const mplusRequestStore = require('../utils/mplusRequestStore');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
@@ -307,16 +308,17 @@ async function handleModal(interaction) {
     if (customId.startsWith('create_event_panel_modal:')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const [, raidId, difficultyId] = customId.split(':');
+        const [, raidId, difficultyId, boostTypeId] = customId.split(':');
         const eventName = buildRaidEventName(raidId, difficultyId);
+        const boostType = findRaidBoostTypeById(boostTypeId);
         const datePart = interaction.fields.getTextInputValue('event_date').trim();
         const timePart = interaction.fields.getTextInputValue('event_time').trim();
         const minItemLevelInput = interaction.fields.getTextInputValue('min_item_level').trim();
         const minRioScoreInput = interaction.fields.getTextInputValue('min_rio_score').trim();
         const capacityInput = interaction.fields.getTextInputValue('capacity').trim();
 
-        if (!eventName) {
-            await interaction.editReply({ content: '❌ Invalid raid or difficulty selection.' });
+        if (!eventName || !boostType) {
+            await interaction.editReply({ content: '❌ Invalid raid, difficulty, or boost type selection.' });
             return;
         }
 
@@ -344,14 +346,14 @@ async function handleModal(interaction) {
                 scheduledDate,
                 interaction.user.id,
                 interaction.guild,
-                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId }
+                { minItemLevel, minRioScore, clientLimit, eventDifficulty: difficultyId, raidBoostType: boostTypeId }
             );
 
             await interaction.editReply({
-                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Capacity:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${formatCutRates(getDefaultCutRates())}`
+                content: `✅ Event created!\n**Event ID:** ${result.eventId}\n**Channel:** ${result.channel}\n**Boost Type:** ${boostType.label}\n**Requirements:** iLvl ${minItemLevel}+ | RIO ${minRioScore}+\n**Capacity:** ${clientLimit === 0 ? 'Unlimited' : clientLimit}\n**Cuts:** ${formatCutRates(getDefaultCutRates())}`
             });
         } catch (error) {
-            logger.logError(error, { context: 'CREATE_EVENT_PANEL_MODAL', userId: interaction.user.id, raidId, difficultyId });
+            logger.logError(error, { context: 'CREATE_EVENT_PANEL_MODAL', userId: interaction.user.id, raidId, difficultyId, boostTypeId });
             await interaction.editReply({ content: '❌ An error occurred while creating the event.' });
         }
         return;

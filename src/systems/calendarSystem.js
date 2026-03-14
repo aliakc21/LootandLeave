@@ -9,6 +9,7 @@ const config = require('../utils/config');
 const { getRaidImageUrl, getDungeonImageUrl } = require('../utils/mediaCatalog');
 const ticketSystem = require('./ticketSystem');
 const { resolveEventCutRates, formatCutRates } = require('../utils/cutConfig');
+const { findRaidBoostTypeById } = require('../utils/contentCatalog');
 
 let client = null;
 
@@ -110,6 +111,10 @@ async function getOrCreateNamedCategory(guild, categoryName) {
 // Get or create weekday category
 async function getOrCreateWeekdayCategory(guild, weekdayName) {
     return getOrCreateNamedCategory(guild, weekdayName);
+}
+
+function getRaidBoostTypeLabel(raidBoostType) {
+    return findRaidBoostTypeById(raidBoostType || 'vip')?.label || 'VIP';
 }
 
 async function getOrCreateCancelRequestsChannel(guild) {
@@ -271,6 +276,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
     const clientLimit = requirements.clientLimit || 0;
     const eventType = requirements.eventType || 'raid';
     const eventDifficulty = requirements.eventDifficulty || null;
+    const raidBoostType = eventType === 'raid' ? (requirements.raidBoostType || 'vip') : null;
     const customCuts = requirements.customCuts || null;
     const categoryName = requirements.categoryName || getWeekdayName(new Date(scheduledDate));
     const scheduledDateIso = new Date(scheduledDate).toISOString();
@@ -278,8 +284,8 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
     try {
         // Save event to database first
         await Database.run(
-            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, event_difficulty, status, min_item_level, min_rio_score, client_limit, cut_treasury_rate, cut_advertiser_rate, cut_booster_rate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, event_difficulty, raid_boost_type, status, min_item_level, min_rio_score, client_limit, cut_treasury_rate, cut_advertiser_rate, cut_booster_rate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 eventId,
                 eventName,
@@ -288,6 +294,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 createdBy,
                 eventType,
                 eventDifficulty,
+                raidBoostType,
                 'open',
                 minItemLevel,
                 minRioScore,
@@ -391,6 +398,9 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 { name: '🆔 Event ID', value: `\`${eventId}\``, inline: true },
                 { name: '📊 Status', value: '🟢 Applications Open', inline: true },
                 { name: '⚔️ Difficulty', value: eventDifficulty || (eventType === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
+                ...(eventType === 'raid'
+                    ? [{ name: '🎟️ Boost Type', value: getRaidBoostTypeLabel(raidBoostType), inline: true }]
+                    : []),
                 { name: '🛡️ Min Item Level', value: String(minItemLevel), inline: true },
                 { name: '🏆 Min Raider.IO', value: String(minRioScore), inline: true },
                 { name: '👤 Client Slots', value: clientLimit === 0 ? 'Unlimited' : `0/${clientLimit}`, inline: true },
@@ -453,7 +463,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
 async function getAvailableClientRaids(limit = 25) {
     try {
         const openRaids = await Database.all(
-            `SELECT event_id, name, scheduled_date, client_limit
+            `SELECT event_id, name, scheduled_date, client_limit, raid_boost_type
              FROM events
              WHERE status = 'open' AND event_type = 'raid'
              ORDER BY scheduled_date ASC`
@@ -610,6 +620,7 @@ async function selectCharacterForEvent(eventId, boosterId, characterName, charac
                 lockReason: 'this week',
                 eventType: 'raid',
                 lockScope: event.event_difficulty || 'raid',
+                allowExistingLock: event.raid_boost_type === 'saved',
             };
 
         const lockResult = await characterSystem.lockCharacter(
@@ -939,6 +950,9 @@ async function updateEventRoster(eventId) {
             { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
             { name: '📊 Status', value: event.status === 'open' ? '🟢 Applications Open' : event.status === 'ended' ? '✅ Ended' : '❌ Cancelled', inline: true },
             { name: '⚔️ Difficulty', value: event.event_difficulty || (event.event_type === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
+            ...(event.event_type === 'raid'
+                ? [{ name: '🎟️ Boost Type', value: getRaidBoostTypeLabel(event.raid_boost_type), inline: true }]
+                : []),
             { name: '🛡️ Min Item Level', value: String(event.min_item_level || 0), inline: true },
             { name: '🏆 Min Raider.IO', value: String(event.min_rio_score || 0), inline: true },
             { name: '👤 Client Slots', value: event.client_limit > 0 ? `${assignedClients}/${event.client_limit}` : `${assignedClients}/Unlimited`, inline: true },

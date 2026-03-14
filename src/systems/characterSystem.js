@@ -276,6 +276,7 @@ async function refreshStaleCharactersBatch(limit = getCharacterRefreshBatchSize(
 function isLockBlockingEvent(lock, options = {}) {
     const eventType = options.eventType || null;
     const eventDifficulty = options.eventDifficulty || null;
+    const raidBoostType = options.raidBoostType || null;
     const lockEventType = lock.event_type || 'raid';
     const lockScope = lock.lock_scope || 'raid';
 
@@ -292,6 +293,10 @@ function isLockBlockingEvent(lock, options = {}) {
     }
 
     if (eventType === 'raid') {
+        if (raidBoostType === 'saved') {
+            return false;
+        }
+
         return lockEventType === 'mythic_plus' || lockScope === (eventDifficulty || 'raid');
     }
 
@@ -337,6 +342,7 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
         const lockReason = options.lockReason || 'this week';
         const eventType = options.eventType || 'raid';
         const lockScope = options.lockScope || null;
+        const allowExistingLock = Boolean(options.allowExistingLock);
         
         // Check if character is already locked
         const existingLocks = await Database.all(
@@ -349,7 +355,7 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
             eventDifficulty: eventType === 'raid' ? lockScope : null,
         }));
         
-        if (existing) {
+        if (existing && !allowExistingLock) {
             return { success: false, message: `This character is already locked for ${lockReason}.` };
         }
         

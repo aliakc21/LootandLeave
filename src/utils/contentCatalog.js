@@ -21,12 +21,22 @@ const RAID_DIFFICULTIES = [
     { id: 'mythic', label: 'Mythic' },
 ];
 
+const RAID_BOOST_TYPES = [
+    { id: 'vip', label: 'VIP' },
+    { id: 'lootshare', label: 'LootShare' },
+    { id: 'saved', label: 'Saved' },
+];
+
 function findRaidById(raidId) {
     return MIDNIGHT_RAIDS.find(raid => raid.id === raidId) || null;
 }
 
 function findDifficultyById(difficultyId) {
     return RAID_DIFFICULTIES.find(difficulty => difficulty.id === difficultyId) || null;
+}
+
+function findRaidBoostTypeById(boostTypeId) {
+    return RAID_BOOST_TYPES.find(boostType => boostType.id === boostTypeId) || null;
 }
 
 function buildRaidEventName(raidId, difficultyId) {
@@ -44,7 +54,9 @@ module.exports = {
     MIDNIGHT_DUNGEONS,
     MIDNIGHT_RAIDS,
     RAID_DIFFICULTIES,
+    RAID_BOOST_TYPES,
     findRaidById,
     findDifficultyById,
+    findRaidBoostTypeById,
     buildRaidEventName,
 };

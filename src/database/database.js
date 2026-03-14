@@ -114,6 +114,7 @@ class Database {
                     channel_id TEXT,
                     event_type TEXT DEFAULT 'raid',
                     event_difficulty TEXT,
+                    raid_boost_type TEXT DEFAULT 'vip',
                     status TEXT DEFAULT 'open',
                     min_item_level INTEGER DEFAULT 0,
                     min_rio_score INTEGER DEFAULT 0,
@@ -291,6 +292,21 @@ class Database {
             `);
 
             await client.query(`
+                CREATE TABLE IF NOT EXISTS channel_visibility_rules (
+                    id BIGSERIAL PRIMARY KEY,
+                    role_id TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    allow_view BOOLEAN DEFAULT TRUE,
+                    allow_send BOOLEAN DEFAULT FALSE,
+                    allow_history BOOLEAN DEFAULT TRUE,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_by TEXT,
+                    UNIQUE (role_id, target_type, target_id)
+                )
+            `);
+
+            await client.query(`
                 INSERT INTO bot_config (key, value, description) VALUES
                 ('min_item_level', '0', 'Minimum item level for character filtering'),
                 ('min_rio_score', '0', 'Minimum RIO score for character filtering'),
@@ -304,6 +320,7 @@ class Database {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_character_locks_character ON character_weekly_locks (character_name, character_realm, locked_until)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_event_applications_event ON event_applications (event_id, status)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_channel_visibility_rules_role ON channel_visibility_rules (role_id, target_type, target_id)`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs (user_id, timestamp)`);
 
             await this.runMigrations(client);
@@ -341,6 +358,7 @@ class Database {
             `ALTER TABLE events ADD COLUMN min_rio_score INTEGER DEFAULT 0`,
             `ALTER TABLE events ADD COLUMN event_type TEXT DEFAULT 'raid'`,
             `ALTER TABLE events ADD COLUMN event_difficulty TEXT`,
+            `ALTER TABLE events ADD COLUMN raid_boost_type TEXT DEFAULT 'vip'`,
             `ALTER TABLE events ADD COLUMN client_limit INTEGER DEFAULT 0`,
             `ALTER TABLE events ADD COLUMN cut_treasury_rate DOUBLE PRECISION`,
             `ALTER TABLE events ADD COLUMN cut_advertiser_rate DOUBLE PRECISION`,
@@ -370,12 +388,25 @@ class Database {
             `ALTER TABLE booster_applications ADD COLUMN registered_characters TEXT`,
             `ALTER TABLE event_applications ADD COLUMN listing_channel_id TEXT`,
             `ALTER TABLE event_applications ADD COLUMN listing_message_id TEXT`,
+            `CREATE TABLE IF NOT EXISTS channel_visibility_rules (
+                id BIGSERIAL PRIMARY KEY,
+                role_id TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                allow_view BOOLEAN DEFAULT TRUE,
+                allow_send BOOLEAN DEFAULT FALSE,
+                allow_history BOOLEAN DEFAULT TRUE,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT,
+                UNIQUE (role_id, target_type, target_id)
+            )`,
             `ALTER TABLE booster_applications ALTER COLUMN last_season_rio TYPE DOUBLE PRECISION USING last_season_rio::DOUBLE PRECISION`,
             `ALTER TABLE booster_applications ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
             `ALTER TABLE booster_applications ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN item_level TYPE DOUBLE PRECISION USING item_level::DOUBLE PRECISION`,
             `ALTER TABLE characters ALTER COLUMN rio_score TYPE DOUBLE PRECISION USING rio_score::DOUBLE PRECISION`,
             `CREATE INDEX IF NOT EXISTS idx_selection_cancel_requests_status ON selection_cancel_requests (status, event_id, booster_id)`,
+            `CREATE INDEX IF NOT EXISTS idx_channel_visibility_rules_role ON channel_visibility_rules (role_id, target_type, target_id)`,
         ];
 
         for (const migration of migrations) {

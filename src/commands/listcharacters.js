@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags, EmbedBuilder, ActionRowBuilder, Butto
 const characterSystem = require('../systems/characterSystem');
 const Database = require('../database/database');
 const logger = require('../utils/logger');
+const { findRaidBoostTypeById } = require('../utils/contentCatalog');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -34,6 +35,7 @@ module.exports = {
             const availableChars = await characterSystem.getAvailableCharacters(interaction.user.id, minItemLevel, minRioScore, {
                 eventType: event.event_type,
                 eventDifficulty: event.event_difficulty,
+                raidBoostType: event.raid_boost_type,
             });
 
             if (availableChars.length === 0) {
@@ -51,7 +53,7 @@ module.exports = {
 
             const embed = new EmbedBuilder()
                 .setTitle('📋 Your Available Characters')
-                .setDescription(`Event: **${event.name}**\nRequirements: **iLvl ${minItemLevel}+** | **RIO ${minRioScore}+**\n\nManagement will select the final roster character from the buttons below.`)
+                .setDescription(`Event: **${event.name}**\nBoost Type: **${findRaidBoostTypeById(event.raid_boost_type)?.label || 'VIP'}**\nRequirements: **iLvl ${minItemLevel}+** | **RIO ${minRioScore}+**\n\nManagement will select the final roster character from the buttons below.${event.raid_boost_type === 'saved' ? '\nSaved raids also allow already-locked raid characters to be listed.' : ''}`)
                 .setColor(0x5865F2)
                 .setTimestamp();
 

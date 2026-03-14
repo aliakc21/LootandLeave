@@ -325,6 +325,8 @@ class Database {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs (user_id, timestamp)`);
 
             await this.runMigrations(client);
+            await this.cleanupCaseVariantCharacterDuplicates(client);
+            await this.ensureCharacterCaseInsensitiveUniqueIndex(client);
             this.isInitialized = true;
             console.log('Connected to PostgreSQL database');
         } finally {
@@ -419,6 +421,150 @@ class Database {
                     console.warn('Migration warning:', error.message);
                 }
             }
+        }
+    }
+
+    async cleanupCaseVariantCharacterDuplicates(client = null) {
+        const executor = client || this.ensurePool();
+
+        try {
+            const result = await executor.query(`
+                SELECT id, booster_id, character_name, character_realm, class_name, spec_name, item_level, rio_score, last_updated, registered_at
+                FROM characters
+                ORDER BY
+                    booster_id ASC,
+                    LOWER(character_name) ASC,
+                    LOWER(character_realm) ASC,
+                    last_updated DESC NULLS LAST,
+                    registered_at ASC NULLS LAST,
+                    id ASC
+            `);
+
+            const groups = new Map();
+            for (const row of result.rows) {
+                const key = `${row.booster_id}|${String(row.character_name).toLowerCase()}|${String(row.character_realm).toLowerCase()}`;
+                const group = groups.get(key) || [];
+                group.push(row);
+                groups.set(key, group);
+            }
+
+            let mergedGroups = 0;
+            let removedRows = 0;
+
+            for (const group of groups.values()) {
+                if (group.length <= 1) {
+                    continue;
+                }
+
+                const canonical = group[0];
+                const duplicateIds = group.slice(1).map(entry => entry.id);
+
+                await executor.query(
+                    `UPDATE character_weekly_locks
+                     SET character_name = $1, character_realm = $2
+                     WHERE booster_id = $3
+                     AND LOWER(character_name) = LOWER($4)
+                     AND LOWER(character_realm) = LOWER($5)`,
+                    [canonical.character_name, canonical.character_realm, canonical.booster_id, canonical.character_name, canonical.character_realm]
+                );
+
+                await executor.query(
+                    `UPDATE event_applications
+                     SET character_name = $1, character_realm = $2
+                     WHERE booster_id = $3
+                     AND LOWER(character_name) = LOWER($4)
+                     AND LOWER(character_realm) = LOWER($5)`,
+                    [canonical.character_name, canonical.character_realm, canonical.booster_id, canonical.character_name, canonical.character_realm]
+                );
+
+                await executor.query(
+                    `UPDATE selection_cancel_requests
+                     SET character_name = $1, character_realm = $2
+                     WHERE booster_id = $3
+                     AND LOWER(character_name) = LOWER($4)
+                     AND LOWER(character_realm) = LOWER($5)`,
+                    [canonical.character_name, canonical.character_realm, canonical.booster_id, canonical.character_name, canonical.character_realm]
+                );
+
+                await executor.query(
+                    `UPDATE booster_applications
+                     SET character_name = $1, character_realm = $2
+                     WHERE applicant_id = $3
+                     AND LOWER(character_name) = LOWER($4)
+                     AND LOWER(character_realm) = LOWER($5)`,
+                    [canonical.character_name, canonical.character_realm, canonical.booster_id, canonical.character_name, canonical.character_realm]
+                );
+
+                const boosterApplications = await executor.query(
+                    `SELECT id, registered_characters
+                     FROM booster_applications
+                     WHERE applicant_id = $1
+                     AND registered_characters IS NOT NULL`,
+                    [canonical.booster_id]
+                );
+
+                for (const application of boosterApplications.rows) {
+                    try {
+                        const parsed = JSON.parse(application.registered_characters);
+                        if (!Array.isArray(parsed)) {
+                            continue;
+                        }
+
+                        let changed = false;
+                        const updatedCharacters = parsed.map(entry => {
+                            if (!entry?.characterName || !entry?.characterRealm) {
+                                return entry;
+                            }
+
+                            if (
+                                String(entry.characterName).toLowerCase() === String(canonical.character_name).toLowerCase()
+                                && String(entry.characterRealm).toLowerCase() === String(canonical.character_realm).toLowerCase()
+                            ) {
+                                changed = true;
+                                return {
+                                    ...entry,
+                                    characterName: canonical.character_name,
+                                    characterRealm: canonical.character_realm,
+                                };
+                            }
+
+                            return entry;
+                        });
+
+                        if (changed) {
+                            await executor.query(
+                                `UPDATE booster_applications SET registered_characters = $1 WHERE id = $2`,
+                                [JSON.stringify(updatedCharacters), application.id]
+                            );
+                        }
+                    } catch {
+                        // Keep malformed historical JSON untouched.
+                    }
+                }
+
+                await executor.query(`DELETE FROM characters WHERE id = ANY($1::bigint[])`, [duplicateIds]);
+                mergedGroups++;
+                removedRows += duplicateIds.length;
+            }
+
+            if (mergedGroups > 0) {
+                console.log(`Merged ${removedRows} duplicate character row(s) across ${mergedGroups} case-insensitive group(s).`);
+            }
+        } catch (error) {
+            console.warn('Character duplicate cleanup warning:', error.message);
+        }
+    }
+
+    async ensureCharacterCaseInsensitiveUniqueIndex(client = null) {
+        const executor = client || this.ensurePool();
+
+        try {
+            await executor.query(
+                `CREATE UNIQUE INDEX IF NOT EXISTS uniq_characters_booster_lower_name_realm
+                 ON characters (booster_id, LOWER(character_name), LOWER(character_realm))`
+            );
+        } catch (error) {
+            console.warn('Character unique index warning:', error.message);
         }
     }
 

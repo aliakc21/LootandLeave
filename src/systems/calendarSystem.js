@@ -275,6 +275,254 @@ function getEventCutText(event) {
     return formatCutRates(resolveEventCutRates(event));
 }
 
+function getRaidBoostTypeChannelSuffix(raidBoostType) {
+    if (raidBoostType === 'lootshare') {
+        return 'ls';
+    }
+
+    if (raidBoostType === 'saved') {
+        return 'saved';
+    }
+
+    return 'vip';
+}
+
+function buildEventChannelName(eventName, scheduledDate, eventType = 'raid', raidBoostType = null) {
+    const eventDate = new Date(scheduledDate);
+    const eventNameSlug = String(eventName || 'event')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .substring(0, 70);
+
+    const hours = String(eventDate.getHours()).padStart(2, '0');
+    const minutes = String(eventDate.getMinutes()).padStart(2, '0');
+    const timeString = `${hours}-${minutes}`;
+    const boostSuffix = eventType === 'raid' ? `-${getRaidBoostTypeChannelSuffix(raidBoostType)}` : '';
+
+    return `${eventNameSlug}${boostSuffix}-${timeString}`.substring(0, 100);
+}
+
+function getEventCategoryName(event) {
+    if (event.event_type === 'mythic_plus') {
+        return 'M+';
+    }
+
+    return getWeekdayName(new Date(event.scheduled_date));
+}
+
+async function ensureEventCategoryAccess(category, guild) {
+    const botMember = guild.members.me;
+    const requiredCategoryPermissions = [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+    ];
+    const categoryPerms = category.permissionsFor(botMember);
+    const missingCategoryPermissions = requiredCategoryPermissions
+        .filter(permission => !categoryPerms?.has(permission))
+        .map(formatPermissionName);
+
+    if (missingCategoryPermissions.length > 0) {
+        throw new Error(
+            `The bot cannot create event channels under \`${category.name}\`. Missing there: ${missingCategoryPermissions.join(', ')}.`
+        );
+    }
+}
+
+function buildEventPermissionOverwrites(guild) {
+    const adminRole = process.env.ROLE_ADMIN;
+    const managementRole = process.env.ROLE_MANAGEMENT;
+    const advertiserRole = process.env.ROLE_ADVERTISER;
+    const boosterRole = process.env.ROLE_BOOSTER;
+
+    const permissionOverwrites = [
+        {
+            id: guild.roles.everyone.id,
+            deny: [PermissionFlagsBits.ViewChannel],
+        },
+        {
+            id: guild.members.me.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+        },
+    ];
+
+    if (adminRole) {
+        const role = guild.roles.cache.get(adminRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+            });
+        }
+    }
+
+    if (managementRole) {
+        const role = guild.roles.cache.get(managementRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
+            });
+        }
+    }
+
+    if (advertiserRole) {
+        const role = guild.roles.cache.get(advertiserRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+            });
+        }
+    }
+
+    if (boosterRole) {
+        const role = guild.roles.cache.get(boosterRole);
+        if (role) {
+            permissionOverwrites.push({
+                id: role.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+            });
+        }
+    }
+
+    return permissionOverwrites;
+}
+
+function buildEventActionRow(eventId) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`end_event_${eventId}`)
+            .setLabel('✅ End Event')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅'),
+        new ButtonBuilder()
+            .setCustomId(`cancel_event_${eventId}`)
+            .setLabel('❌ Cancel Event')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('❌'),
+        new ButtonBuilder()
+            .setCustomId(`view_event_admin_details_${eventId}`)
+            .setLabel('Admin Details')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('🔎')
+    );
+}
+
+function buildEventEmbed(event, guild, categoryName) {
+    const eventDate = new Date(event.scheduled_date);
+    const eventDateTimestamp = Math.floor(eventDate.getTime() / 1000);
+
+    return new EmbedBuilder()
+        .setTitle(`📅 ${event.name}`)
+        .setDescription(event.description || 'No description provided')
+        .addFields(
+            { name: '📆 Date & Time', value: `<t:${eventDateTimestamp}:F>\n<t:${eventDateTimestamp}:R>`, inline: false },
+            { name: '📅 Category', value: categoryName, inline: true },
+            { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
+            { name: '📊 Status', value: '🟢 Applications Open', inline: true },
+            { name: '⚔️ Difficulty', value: event.event_difficulty || (event.event_type === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
+            ...(event.event_type === 'raid'
+                ? [{ name: '🎟️ Boost Type', value: getRaidBoostTypeLabel(event.raid_boost_type), inline: true }]
+                : []),
+            { name: '🛡️ Min Item Level', value: String(event.min_item_level || 0), inline: true },
+            { name: '🏆 Min Raider.IO', value: String(event.min_rio_score || 0), inline: true },
+            { name: '👤 Client Slots', value: event.client_limit === 0 ? 'Unlimited' : `0/${event.client_limit}`, inline: true },
+            { name: '👥 Roster', value: 'No characters selected yet', inline: false },
+            { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
+        )
+        .setImage(event.event_type === 'mythic_plus' ? getDungeonImageUrl(event.name) : getRaidImageUrl(event.name))
+        .setColor(0x5865F2)
+        .setTimestamp(eventDate)
+        .setFooter({ text: `Created by ${guild.members.cache.get(event.created_by)?.displayName || 'Unknown'}` });
+}
+
+async function ensureOpenEventInfrastructure(eventOrId, guildOverride = null) {
+    const event = typeof eventOrId === 'string'
+        ? await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventOrId])
+        : eventOrId;
+
+    if (!event || event.status !== 'open') {
+        return { success: false, message: 'Event not found or not open.' };
+    }
+
+    const guild = guildOverride || await client.guilds.fetch(process.env.DISCORD_GUILD_ID);
+    if (!guild) {
+        return { success: false, message: 'Guild not found.' };
+    }
+
+    const categoryName = getEventCategoryName(event);
+    const weekdayName = getWeekdayName(new Date(event.scheduled_date));
+    const category = categoryName === weekdayName
+        ? await getOrCreateWeekdayCategory(guild, weekdayName)
+        : await getOrCreateNamedCategory(guild, categoryName);
+
+    await ensureEventCategoryAccess(category, guild);
+
+    const expectedChannelName = buildEventChannelName(event.name, event.scheduled_date, event.event_type, event.raid_boost_type);
+    const permissionOverwrites = buildEventPermissionOverwrites(guild);
+    let channel = event.channel_id ? await client.channels.fetch(event.channel_id).catch(() => null) : null;
+    const createdChannel = !channel;
+
+    if (!channel) {
+        channel = await guild.channels.create({
+            name: expectedChannelName,
+            type: ChannelType.GuildText,
+            parent: category.id,
+            permissionOverwrites,
+            topic: `Event: ${event.name} - ${new Date(event.scheduled_date).toLocaleString()}`,
+        });
+    } else {
+        if (channel.parentId !== category.id) {
+            await channel.setParent(category.id, { lockPermissions: false });
+        }
+        if (channel.name !== expectedChannelName) {
+            await channel.setName(expectedChannelName);
+        }
+        if (channel.topic !== `Event: ${event.name} - ${new Date(event.scheduled_date).toLocaleString()}`) {
+            await channel.setTopic(`Event: ${event.name} - ${new Date(event.scheduled_date).toLocaleString()}`);
+        }
+        await channel.permissionOverwrites.set(permissionOverwrites);
+    }
+
+    const eventEmbed = buildEventEmbed(event, guild, categoryName);
+    const actionRow = buildEventActionRow(event.event_id);
+    let message = event.message_id ? await channel.messages.fetch(event.message_id).catch(() => null) : null;
+
+    if (!message) {
+        message = await channel.send({ embeds: [eventEmbed], components: [actionRow] });
+    } else {
+        await message.edit({ embeds: [eventEmbed], components: [actionRow] });
+    }
+
+    await Database.run(
+        `UPDATE events SET message_id = ?, channel_id = ? WHERE event_id = ?`,
+        [message.id, channel.id, event.event_id]
+    );
+
+    await updateEventRoster(event.event_id);
+
+    if (createdChannel) {
+        logger.logAction('EVENT_CHANNEL_CREATED', event.created_by, {
+            eventId: event.event_id,
+            channelId: channel.id,
+            channelName: channel.name
+        });
+    } else {
+        logger.logAction('EVENT_INFRASTRUCTURE_REPAIRED', 'SYSTEM', {
+            eventId: event.event_id,
+            channelId: channel.id,
+            channelName: channel.name
+        });
+    }
+
+    return { success: true, eventId: event.event_id, channel, message };
+}
+
 async function createEvent(eventName, description, scheduledDate, createdBy, guild, requirements = {}) {
     const eventId = `event-${uuidv4().substring(0, 8)}`;
     const minItemLevel = requirements.minItemLevel || 0;
@@ -312,173 +560,32 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
             ]
         );
         eventInserted = true;
-
-        // Get weekday and create/find category
-        const eventDate = new Date(scheduledDate);
-        const weekdayName = getWeekdayName(eventDate);
-        const category = categoryName === weekdayName
-            ? await getOrCreateWeekdayCategory(guild, weekdayName)
-            : await getOrCreateNamedCategory(guild, categoryName);
-
-        const botMember = guild.members.me;
-        const requiredCategoryPermissions = [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.ManageChannels,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-        ];
-        const categoryPerms = category.permissionsFor(botMember);
-        const missingCategoryPermissions = requiredCategoryPermissions
-            .filter(permission => !categoryPerms?.has(permission))
-            .map(formatPermissionName);
-
-        if (missingCategoryPermissions.length > 0) {
-            throw new Error(
-                `The bot cannot create event channels under \`${category.name}\`. Missing there: ${missingCategoryPermissions.join(', ')}.`
-            );
-        }
-
-        // Get role IDs for permissions
-        const adminRole = process.env.ROLE_ADMIN;
-        const managementRole = process.env.ROLE_MANAGEMENT;
-        const advertiserRole = process.env.ROLE_ADVERTISER;
-        const boosterRole = process.env.ROLE_BOOSTER;
-
-        const permissionOverwrites = [
+        const provision = await ensureOpenEventInfrastructure(
             {
-                id: guild.roles.everyone.id,
-                deny: [PermissionFlagsBits.ViewChannel],
+                event_id: eventId,
+                name: eventName,
+                description,
+                scheduled_date: scheduledDateIso,
+                created_by: createdBy,
+                event_type: eventType,
+                event_difficulty: eventDifficulty,
+                raid_boost_type: raidBoostType,
+                status: 'open',
+                min_item_level: minItemLevel,
+                min_rio_score: minRioScore,
+                client_limit: clientLimit,
+                cut_treasury_rate: customCuts?.treasuryRate ?? null,
+                cut_advertiser_rate: customCuts?.advertiserRate ?? null,
+                cut_booster_rate: customCuts?.boosterRate ?? null,
+                channel_id: null,
+                message_id: null,
             },
-            {
-                id: guild.members.me.id,
-                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
-            },
-        ];
-
-        // Add management roles
-        if (adminRole) {
-            const role = guild.roles.cache.get(adminRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
-                });
-            }
-        }
-        if (managementRole) {
-            const role = guild.roles.cache.get(managementRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels],
-                });
-            }
-        }
-        if (advertiserRole) {
-            const role = guild.roles.cache.get(advertiserRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-                });
-            }
-        }
-        if (boosterRole) {
-            const role = guild.roles.cache.get(boosterRole);
-            if (role) {
-                permissionOverwrites.push({
-                    id: role.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                });
-            }
-        }
-
-        // Create event channel name with time
-        const eventNameSlug = eventName.toLowerCase()
-            .replace(/[^a-z0-9\s-]/g, '')
-            .replace(/\s+/g, '-')
-            .substring(0, 80);
-        
-        const hours = String(eventDate.getHours()).padStart(2, '0');
-        const minutes = String(eventDate.getMinutes()).padStart(2, '0');
-        const timeString = `${hours}-${minutes}`;
-
-        const channelName = `${eventNameSlug}-${timeString}`;
-        
-        const eventChannel = await guild.channels.create({
-            name: channelName,
-            type: ChannelType.GuildText,
-            parent: category.id,
-            permissionOverwrites,
-            topic: `Event: ${eventName} - ${new Date(scheduledDate).toLocaleString()}`,
-        });
-
-        // Create detailed event embed
-        const eventDateTimestamp = Math.floor(eventDate.getTime() / 1000);
-        const eventEmbed = new EmbedBuilder()
-            .setTitle(`📅 ${eventName}`)
-            .setDescription(description || 'No description provided')
-            .addFields(
-                { name: '📆 Date & Time', value: `<t:${eventDateTimestamp}:F>\n<t:${eventDateTimestamp}:R>`, inline: false },
-                { name: '📅 Category', value: categoryName, inline: true },
-                { name: '🆔 Event ID', value: `\`${eventId}\``, inline: true },
-                { name: '📊 Status', value: '🟢 Applications Open', inline: true },
-                { name: '⚔️ Difficulty', value: eventDifficulty || (eventType === 'mythic_plus' ? 'Mythic+' : 'N/A'), inline: true },
-                ...(eventType === 'raid'
-                    ? [{ name: '🎟️ Boost Type', value: getRaidBoostTypeLabel(raidBoostType), inline: true }]
-                    : []),
-                { name: '🛡️ Min Item Level', value: String(minItemLevel), inline: true },
-                { name: '🏆 Min Raider.IO', value: String(minRioScore), inline: true },
-                { name: '👤 Client Slots', value: clientLimit === 0 ? 'Unlimited' : `0/${clientLimit}`, inline: true },
-                { name: '👥 Roster', value: 'No characters selected yet', inline: false },
-                { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
-            )
-            .setImage(eventType === 'mythic_plus' ? getDungeonImageUrl(eventName) : getRaidImageUrl(eventName))
-            .setColor(0x5865F2)
-            .setTimestamp(eventDate)
-            .setFooter({ text: `Created by ${guild.members.cache.get(createdBy)?.displayName || 'Unknown'}` });
-
-        // Add End Event and Cancel Event buttons for managers/admins
-        const actionRow = new ActionRowBuilder();
-        actionRow.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`end_event_${eventId}`)
-                .setLabel('✅ End Event')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('✅'),
-            new ButtonBuilder()
-                .setCustomId(`cancel_event_${eventId}`)
-                .setLabel('❌ Cancel Event')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji('❌'),
-            new ButtonBuilder()
-                .setCustomId(`view_event_admin_details_${eventId}`)
-                .setLabel('Admin Details')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji('🔎')
-        );
-
-        // Send detailed embed to channel
-        const message = await eventChannel.send({
-            embeds: [eventEmbed],
-            components: [actionRow]
-        });
-
-        // Update event with channel and message ID
-        await Database.run(
-            `UPDATE events SET message_id = ?, channel_id = ? WHERE event_id = ?`,
-            [message.id, eventChannel.id, eventId]
+            guild
         );
 
         // Log event creation
         logger.logEventCreated(eventId, eventName, createdBy, scheduledDate);
-        logger.logAction('EVENT_CHANNEL_CREATED', createdBy, {
-            eventId,
-            channelId: eventChannel.id,
-            channelName: eventChannel.name
-        });
-
-        return { success: true, eventId, channel: eventChannel.toString() };
+        return { success: true, eventId, channel: provision.channel.toString() };
     } catch (error) {
         if (eventInserted) {
             await Database.run(`DELETE FROM events WHERE event_id = ? AND channel_id IS NULL`, [eventId]).catch(() => {});
@@ -492,7 +599,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
 async function getAvailableClientRaids(limit = 25) {
     try {
         const openRaids = await Database.all(
-            `SELECT event_id, name, scheduled_date, client_limit, raid_boost_type
+            `SELECT event_id, name, scheduled_date, client_limit, raid_boost_type, channel_id, message_id
              FROM events
              WHERE status = 'open' AND event_type = 'raid'
              ORDER BY scheduled_date ASC`
@@ -500,6 +607,29 @@ async function getAvailableClientRaids(limit = 25) {
 
         const raidsWithCapacity = [];
         for (const raid of openRaids) {
+            let needsRepair = !raid.channel_id || !raid.message_id;
+            if (!needsRepair && client) {
+                const channel = await client.channels.fetch(raid.channel_id).catch(() => null);
+                if (!channel) {
+                    needsRepair = true;
+                } else {
+                    const message = await channel.messages.fetch(raid.message_id).catch(() => null);
+                    if (!message) {
+                        needsRepair = true;
+                    }
+                }
+            }
+
+            if (needsRepair) {
+                const infrastructure = await ensureOpenEventInfrastructure(raid.event_id).catch(error => {
+                    logger.logError(error, { context: 'REPAIR_RAID_INFRASTRUCTURE_FOR_LISTING', eventId: raid.event_id });
+                    return { success: false };
+                });
+                if (!infrastructure?.success) {
+                    continue;
+                }
+            }
+
             const assignedClients = await getAssignedClientCount(raid.event_id);
             if (raid.client_limit > 0 && assignedClients >= raid.client_limit) {
                 continue;
@@ -1314,9 +1444,67 @@ async function autoEndEvents() {
     }
 }
 
+async function repairOpenEventInfrastructure(limit = 50) {
+    try {
+        const openEvents = await Database.all(
+            `SELECT event_id, channel_id, message_id
+             FROM events
+             WHERE status = 'open'
+             ORDER BY scheduled_date ASC`
+        );
+
+        let repairedCount = 0;
+        let failedCount = 0;
+        let checkedCount = 0;
+
+        for (const event of openEvents.slice(0, limit)) {
+            checkedCount++;
+            let needsRepair = !event.channel_id || !event.message_id;
+
+            if (!needsRepair && client) {
+                const channel = await client.channels.fetch(event.channel_id).catch(() => null);
+                if (!channel) {
+                    needsRepair = true;
+                } else {
+                    const message = await channel.messages.fetch(event.message_id).catch(() => null);
+                    if (!message) {
+                        needsRepair = true;
+                    }
+                }
+            }
+
+            if (!needsRepair) {
+                continue;
+            }
+
+            const result = await ensureOpenEventInfrastructure(event.event_id).catch(error => {
+                logger.logError(error, { context: 'REPAIR_OPEN_EVENT_INFRASTRUCTURE', eventId: event.event_id });
+                return { success: false };
+            });
+
+            if (result?.success) {
+                repairedCount++;
+            } else {
+                failedCount++;
+            }
+        }
+
+        return {
+            success: true,
+            checkedCount,
+            repairedCount,
+            failedCount,
+        };
+    } catch (error) {
+        logger.logError(error, { context: 'REPAIR_OPEN_EVENT_INFRASTRUCTURE_BATCH' });
+        return { success: false, message: error.message };
+    }
+}
+
 module.exports = {
     initialize,
     createEvent,
+    repairOpenEventInfrastructure,
     getAvailableClientRaids,
     getAssignedClientCount,
     getApprovedClientsForEvent,

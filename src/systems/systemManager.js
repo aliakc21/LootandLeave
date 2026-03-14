@@ -32,6 +32,14 @@ function initializeSystems(client) {
         await calendarSystem.autoEndEvents();
     });
 
+    // Repair stale open events that exist in the database but are missing Discord infrastructure.
+    cron.schedule('10,25,40,55 * * * *', async () => {
+        const result = await calendarSystem.repairOpenEventInfrastructure();
+        if (result.success && (result.repairedCount > 0 || result.failedCount > 0)) {
+            logger.logInfo(`Open event repair check executed: ${result.repairedCount} repaired, ${result.failedCount} failed, ${result.checkedCount} checked.`);
+        }
+    });
+
     // Refresh stale character data from Raider.IO every hour in small batches.
     cron.schedule('15 * * * *', async () => {
         const result = await characterSystem.refreshStaleCharactersBatch();

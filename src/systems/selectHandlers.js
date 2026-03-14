@@ -70,6 +70,7 @@ async function resetManagerCharacterSelectionMessage(message, eventId, boosterId
             eventType: event.event_type,
             eventDifficulty: event.event_difficulty,
             raidBoostType: event.raid_boost_type,
+            eventScheduledDate: event.scheduled_date,
         }
     );
 

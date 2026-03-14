@@ -36,11 +36,12 @@ module.exports = {
                 eventType: event.event_type,
                 eventDifficulty: event.event_difficulty,
                 raidBoostType: event.raid_boost_type,
+                eventScheduledDate: event.scheduled_date,
             });
 
             if (availableChars.length === 0) {
                 await interaction.editReply({
-                    content: `❌ None of your registered characters are eligible for **${event.name}** right now.\nRequirements: iLvl ${minItemLevel}+ and RIO ${minRioScore}+.\nRaid locks last until weekly reset. Mythic+ locks last 1 hour 30 minutes.`
+                    content: `❌ None of your registered characters are eligible for **${event.name}** right now.\nRequirements: iLvl ${minItemLevel}+ and RIO ${minRioScore}+.\nRaid locks only block raids scheduled before the next weekly reset. Mythic+ has no character lock.`
                 });
                 return;
             }

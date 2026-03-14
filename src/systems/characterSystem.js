@@ -291,6 +291,7 @@ function isLockBlockingEvent(lock, options = {}) {
     const eventType = options.eventType || null;
     const eventDifficulty = options.eventDifficulty || null;
     const raidBoostType = options.raidBoostType || null;
+    const eventScheduledDate = options.eventScheduledDate ? new Date(options.eventScheduledDate) : null;
     const lockEventType = lock.event_type || 'raid';
     const lockScope = lock.lock_scope || 'raid';
 
@@ -298,12 +299,8 @@ function isLockBlockingEvent(lock, options = {}) {
         return true;
     }
 
-    if (lockEventType === 'mythic_plus') {
-        return true;
-    }
-
     if (eventType === 'mythic_plus') {
-        return lockEventType === 'mythic_plus';
+        return false;
     }
 
     if (eventType === 'raid') {
@@ -311,7 +308,20 @@ function isLockBlockingEvent(lock, options = {}) {
             return false;
         }
 
-        return lockEventType === 'mythic_plus' || lockScope === (eventDifficulty || 'raid');
+        if (lockEventType !== 'raid' || lockScope !== (eventDifficulty || 'raid')) {
+            return false;
+        }
+
+        const lockUntil = new Date(lock.locked_until);
+        if (Number.isNaN(lockUntil.getTime())) {
+            return true;
+        }
+
+        if (!eventScheduledDate || Number.isNaN(eventScheduledDate.getTime())) {
+            return true;
+        }
+
+        return eventScheduledDate < lockUntil;
     }
 
     return true;
@@ -367,6 +377,8 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
         const existing = existingLocks.find(lock => isLockBlockingEvent(lock, {
             eventType,
             eventDifficulty: eventType === 'raid' ? lockScope : null,
+            eventScheduledDate: options.eventScheduledDate || null,
+            raidBoostType: options.raidBoostType || null,
         }));
         
         if (existing && !allowExistingLock) {
@@ -385,12 +397,6 @@ async function lockCharacter(boosterId, characterName, characterRealm, eventId, 
         logger.logError(error, { context: 'LOCK_CHARACTER', boosterId, characterName, characterRealm });
         return { success: false, message: `Error: ${error.message}` };
     }
-}
-
-function getMythicPlusLockUntil() {
-    const lockUntil = new Date();
-    lockUntil.setMinutes(lockUntil.getMinutes() + 90);
-    return lockUntil.toISOString();
 }
 
 // Unlock a character (for admin use)
@@ -428,22 +434,47 @@ async function unlockCharacter(boosterId, characterName, characterRealm, options
     }
 }
 
-// Get next Wednesday (weekly reset day)
-function getNextWednesday() {
-    const now = new Date();
-    const day = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 3 = Wednesday
-    const daysUntilWednesday = (3 - day + 7) % 7 || 7; // Days until next Wednesday
-    
-    const nextWednesday = new Date(now);
-    nextWednesday.setDate(now.getDate() + daysUntilWednesday);
-    nextWednesday.setHours(9, 0, 0, 0); // Reset at 9 AM (adjust as needed)
-    
-    return nextWednesday;
+// Get the next weekly reset relative to the provided time (Wednesday 09:00).
+function getNextWednesday(referenceDate = new Date()) {
+    const base = new Date(referenceDate);
+    const reset = new Date(base);
+    reset.setHours(9, 0, 0, 0);
+
+    let daysUntilWednesday = (3 - base.getDay() + 7) % 7;
+    if (daysUntilWednesday === 0 && base >= reset) {
+        daysUntilWednesday = 7;
+    }
+
+    reset.setDate(base.getDate() + daysUntilWednesday);
+    return reset;
+}
+
+async function normalizeLegacyRaidLocks() {
+    const legacyLocks = await Database.all(
+        `SELECT l.id, l.locked_until, e.scheduled_date
+         FROM character_weekly_locks l
+         LEFT JOIN events e ON e.event_id = l.event_id
+         WHERE l.event_type = 'raid'
+         AND l.locked_until >= '2090-01-01'`
+    );
+
+    for (const lock of legacyLocks) {
+        const scheduledDate = lock.scheduled_date ? new Date(lock.scheduled_date) : null;
+        const correctedLockUntil = scheduledDate && !Number.isNaN(scheduledDate.getTime())
+            ? getNextWednesday(scheduledDate).toISOString()
+            : new Date().toISOString();
+
+        await Database.run(
+            `UPDATE character_weekly_locks SET locked_until = ? WHERE id = ?`,
+            [correctedLockUntil, lock.id]
+        );
+    }
 }
 
 // Clean up expired locks (should be called periodically)
 async function cleanupExpiredLocks() {
     try {
+        await normalizeLegacyRaidLocks();
         const now = new Date().toISOString();
         await Database.run(
             `DELETE FROM character_weekly_locks WHERE locked_until < ?`,
@@ -489,7 +520,6 @@ module.exports = {
     refreshCharacter,
     cleanupExpiredLocks,
     getNextWednesday,
-    getMythicPlusLockUntil,
     registerMultipleCharacters,
     registerCharacterEntries,
     getCharacterRefreshIntervalMinutes,

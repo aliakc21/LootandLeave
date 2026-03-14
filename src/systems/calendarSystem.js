@@ -771,29 +771,29 @@ async function selectCharacterForEvent(eventId, boosterId, characterName, charac
             return { success: false, message: 'Character not found.' };
         }
 
-        const lockOptions = event.event_type === 'mythic_plus'
+        const lockOptions = event.event_type === 'raid'
             ? {
-                lockedUntil: characterSystem.getMythicPlusLockUntil(),
-                lockReason: 'the next 1 hour 30 minutes',
-                eventType: 'mythic_plus',
-                lockScope: event.event_id,
-            }
-            : {
-                lockReason: 'this week',
+                lockedUntil: characterSystem.getNextWednesday(event.scheduled_date).toISOString(),
+                lockReason: 'the weekly reset for that raid week',
                 eventType: 'raid',
                 lockScope: event.event_difficulty || 'raid',
                 allowExistingLock: event.raid_boost_type === 'saved',
-            };
+                eventScheduledDate: event.scheduled_date,
+                raidBoostType: event.raid_boost_type,
+            }
+            : null;
 
-        const lockResult = await characterSystem.lockCharacter(
-            boosterId,
-            characterName,
-            characterRealm,
-            eventId,
-            lockOptions
-        );
-        if (!lockResult.success) {
-            return lockResult;
+        if (lockOptions) {
+            const lockResult = await characterSystem.lockCharacter(
+                boosterId,
+                characterName,
+                characterRealm,
+                eventId,
+                lockOptions
+            );
+            if (!lockResult.success) {
+                return lockResult;
+            }
         }
 
         // Create or update application
@@ -1237,16 +1237,6 @@ async function endEvent(eventId, totalGoldFromModal, endedBy) {
             [eventId]
         );
 
-        if (event.event_type !== 'mythic_plus') {
-            // Permanently lock raid characters only.
-            for (const app of applications) {
-                await Database.run(
-                    `UPDATE character_weekly_locks SET locked_until = '2099-12-31' WHERE booster_id = ? AND character_name = ? AND character_realm = ? AND event_id = ?`,
-                    [app.booster_id, app.character_name, app.character_realm, eventId]
-                );
-            }
-        }
-
         // Update event status
         await Database.run(
             `UPDATE events SET status = 'ended' WHERE event_id = ?`,
@@ -1292,7 +1282,7 @@ async function endEvent(eventId, totalGoldFromModal, endedBy) {
             try {
                 const channel = await client.channels.fetch(event.channel_id);
                 if (channel) {
-                    await channel.send(`✅ **Event Ended Successfully**\nThis ${event.event_type === 'mythic_plus' ? 'Mythic+ run' : 'event'} has been completed by <@${endedBy}>. ${event.event_type === 'mythic_plus' ? 'Payments have been processed.' : 'All characters have been permanently locked. Payments have been processed and private receipts have been sent to all boosters.'} This channel is being archived and removed now.`);
+                    await channel.send(`✅ **Event Ended Successfully**\nThis ${event.event_type === 'mythic_plus' ? 'Mythic+ run' : 'event'} has been completed by <@${endedBy}>. ${event.event_type === 'mythic_plus' ? 'Payments have been processed.' : 'Raid locks remain only until the weekly reset. Payments have been processed and private receipts have been sent to all boosters.'} This channel is being archived and removed now.`);
                     deleteEventChannelSoon(channel, eventId, event.channel_id);
                 }
             } catch (error) {

@@ -108,6 +108,54 @@ async function resetManagerCharacterSelectionMessage(message, eventId, boosterId
     await message.edit({ components });
 }
 
+function messageMatchesManagerListing(message, eventId, boosterId) {
+    if (!message?.components?.length) {
+        return false;
+    }
+
+    const selectId = `manager_select_char_${eventId}_${boosterId}`;
+    const deselectPrefix = `deselect_char_${eventId}_${boosterId}_`;
+
+    for (const row of message.components) {
+        for (const component of row.components || []) {
+            if (component.customId === selectId || component.customId?.startsWith(deselectPrefix)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+async function findManagerCharacterSelectionMessage(channel, eventId, boosterId) {
+    if (!channel?.messages) {
+        return null;
+    }
+
+    let before;
+    let scanned = 0;
+    while (scanned < 300) {
+        const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+        if (batch.size === 0) {
+            break;
+        }
+
+        for (const message of batch.values()) {
+            if (messageMatchesManagerListing(message, eventId, boosterId)) {
+                return message;
+            }
+        }
+
+        scanned += batch.size;
+        before = batch.last()?.id;
+        if (batch.size < 100) {
+            break;
+        }
+    }
+
+    return null;
+}
+
 async function handleSelect(interaction) {
     const { customId } = interaction;
 
@@ -511,6 +559,7 @@ async function handleSelect(interaction) {
 }
 
 module.exports = {
+    findManagerCharacterSelectionMessage,
     handleSelect,
     resetManagerCharacterSelectionMessage,
 };

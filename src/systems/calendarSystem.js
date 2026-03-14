@@ -236,7 +236,7 @@ async function getAssignedClientCount(eventId) {
             `SELECT COUNT(*) AS total
              FROM tickets
              WHERE event_id = ?
-             AND boost_type IN ('raid', 'raid_request')
+             AND boost_type IN ('raid', 'raid_request', 'mythic_plus')
              AND approval_status = 'approved'`,
             [eventId]
         );
@@ -254,7 +254,7 @@ async function getApprovedClientsForEvent(eventId) {
             `SELECT client_id, ticket_id, settled_gold, client_character_name, client_character_realm
              FROM tickets
              WHERE event_id = ?
-             AND boost_type IN ('raid', 'raid_request')
+             AND boost_type IN ('raid', 'raid_request', 'mythic_plus')
              AND approval_status = 'approved'
              ORDER BY approved_at ASC, created_at ASC`,
             [eventId]
@@ -821,17 +821,45 @@ async function approveSelectionCancelRequest(requestId, approvedBy) {
             [approvedBy, requestId]
         );
 
-        if (request.source_channel_id && request.source_message_id) {
-            try {
-                const channel = await client.channels.fetch(request.source_channel_id);
-                const message = channel ? await channel.messages.fetch(request.source_message_id) : null;
-                if (message) {
-                    const selectHandlers = require('./selectHandlers');
-                    await selectHandlers.resetManagerCharacterSelectionMessage(message, request.event_id, request.booster_id);
-                }
-            } catch (error) {
-                logger.logError(error, { context: 'RESET_LISTING_MESSAGE_AFTER_CANCEL_APPROVAL', requestId });
+        try {
+            const selectHandlers = require('./selectHandlers');
+            let message = null;
+
+            if (request.source_channel_id && request.source_message_id) {
+                const sourceChannel = await client.channels.fetch(request.source_channel_id).catch(() => null);
+                message = sourceChannel
+                    ? await sourceChannel.messages.fetch(request.source_message_id).catch(() => null)
+                    : null;
             }
+
+            if (!message) {
+                const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [request.event_id]);
+                const eventChannel = event?.channel_id
+                    ? await client.channels.fetch(event.channel_id).catch(() => null)
+                    : null;
+
+                if (eventChannel) {
+                    message = await selectHandlers.findManagerCharacterSelectionMessage(
+                        eventChannel,
+                        request.event_id,
+                        request.booster_id
+                    );
+                }
+            }
+
+            if (message) {
+                await selectHandlers.resetManagerCharacterSelectionMessage(message, request.event_id, request.booster_id);
+            } else {
+                logger.logWarning('Could not find the original listing message to reset after cancel approval', {
+                    requestId,
+                    eventId: request.event_id,
+                    boosterId: request.booster_id,
+                    sourceChannelId: request.source_channel_id,
+                    sourceMessageId: request.source_message_id,
+                });
+            }
+        } catch (error) {
+            logger.logError(error, { context: 'RESET_LISTING_MESSAGE_AFTER_CANCEL_APPROVAL', requestId });
         }
 
         try {

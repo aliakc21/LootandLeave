@@ -117,6 +117,12 @@ function getRaidBoostTypeLabel(raidBoostType) {
     return findRaidBoostTypeById(raidBoostType || 'vip')?.label || 'VIP';
 }
 
+function formatPermissionName(permission) {
+    return String(permission)
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 async function getOrCreateCancelRequestsChannel(guild) {
     let channel = guild.channels.cache.find(
         entry => entry.name === 'cancel-requests' && entry.type === ChannelType.GuildText
@@ -281,6 +287,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
     const categoryName = requirements.categoryName || getWeekdayName(new Date(scheduledDate));
     const scheduledDateIso = new Date(scheduledDate).toISOString();
 
+    let eventInserted = false;
     try {
         // Save event to database first
         await Database.run(
@@ -304,6 +311,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 customCuts?.boosterRate ?? null,
             ]
         );
+        eventInserted = true;
 
         // Get weekday and create/find category
         const eventDate = new Date(scheduledDate);
@@ -311,6 +319,24 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
         const category = categoryName === weekdayName
             ? await getOrCreateWeekdayCategory(guild, weekdayName)
             : await getOrCreateNamedCategory(guild, categoryName);
+
+        const botMember = guild.members.me;
+        const requiredCategoryPermissions = [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+        ];
+        const categoryPerms = category.permissionsFor(botMember);
+        const missingCategoryPermissions = requiredCategoryPermissions
+            .filter(permission => !categoryPerms?.has(permission))
+            .map(formatPermissionName);
+
+        if (missingCategoryPermissions.length > 0) {
+            throw new Error(
+                `The bot cannot create event channels under \`${category.name}\`. Missing there: ${missingCategoryPermissions.join(', ')}.`
+            );
+        }
 
         // Get role IDs for permissions
         const adminRole = process.env.ROLE_ADMIN;
@@ -454,6 +480,9 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
 
         return { success: true, eventId, channel: eventChannel.toString() };
     } catch (error) {
+        if (eventInserted) {
+            await Database.run(`DELETE FROM events WHERE event_id = ? AND channel_id IS NULL`, [eventId]).catch(() => {});
+        }
         logger.logError(error, { context: 'CREATE_EVENT', eventName, createdBy });
         throw error;
     }

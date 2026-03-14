@@ -354,7 +354,7 @@ async function handleModal(interaction) {
             });
         } catch (error) {
             logger.logError(error, { context: 'CREATE_EVENT_PANEL_MODAL', userId: interaction.user.id, raidId, difficultyId, boostTypeId });
-            await interaction.editReply({ content: '❌ An error occurred while creating the event.' });
+            await interaction.editReply({ content: `❌ ${error.message}` });
         }
         return;
     }

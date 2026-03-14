@@ -46,30 +46,15 @@ function extractCustomIds(message) {
 }
 
 async function deleteExistingManagedPanelMessages(channel, botUserId, managedCustomIds) {
-    let before;
-    let scanned = 0;
-
-    while (scanned < 500) {
-        const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
-        if (batch.size === 0) {
-            break;
+    const batch = await channel.messages.fetch({ limit: 50 });
+    for (const message of batch.values()) {
+        if (message.author?.id !== botUserId) {
+            continue;
         }
 
-        for (const message of batch.values()) {
-            if (message.author?.id !== botUserId) {
-                continue;
-            }
-
-            const messageCustomIds = extractCustomIds(message);
-            if (messageCustomIds.some(customId => managedCustomIds.has(customId))) {
-                await message.delete().catch(() => {});
-            }
-        }
-
-        scanned += batch.size;
-        before = batch.last()?.id;
-        if (batch.size < 100) {
-            break;
+        const messageCustomIds = extractCustomIds(message);
+        if (messageCustomIds.some(customId => managedCustomIds.has(customId))) {
+            await message.delete().catch(() => {});
         }
     }
 }
@@ -87,6 +72,11 @@ async function enforceRoleVisibilityScope(guild, roleIds, allowedChannelIds, all
         }
 
         for (const roleId of roleIds.filter(Boolean)) {
+            const overwrite = channel.permissionOverwrites.cache.get(roleId);
+            if (overwrite?.deny.has(PermissionFlagsBits.ViewChannel)) {
+                continue;
+            }
+
             await channel.permissionOverwrites.edit(roleId, {
                 ViewChannel: false,
             }).catch(() => {});
@@ -99,11 +89,16 @@ async function enforceIntroOnlyAccess(guild, introChannelId, privilegedRoleIds =
         const everyoneOverwrite = channel.permissionOverwrites.cache.get(guild.roles.everyone.id);
 
         if (channel.id === introChannelId) {
-            await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-                ViewChannel: true,
-                ReadMessageHistory: true,
-                SendMessages: false,
-            }).catch(() => {});
+            const alreadyConfigured = everyoneOverwrite?.allow.has(PermissionFlagsBits.ViewChannel)
+                && everyoneOverwrite?.allow.has(PermissionFlagsBits.ReadMessageHistory)
+                && everyoneOverwrite?.deny.has(PermissionFlagsBits.SendMessages);
+            if (!alreadyConfigured) {
+                await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+                    ViewChannel: true,
+                    ReadMessageHistory: true,
+                    SendMessages: false,
+                }).catch(() => {});
+            }
             continue;
         }
 
@@ -114,6 +109,11 @@ async function enforceIntroOnlyAccess(guild, introChannelId, privilegedRoleIds =
         }
 
         for (const roleId of privilegedRoleIds.filter(Boolean)) {
+            const overwrite = channel.permissionOverwrites.cache.get(roleId);
+            if (overwrite?.allow.has(PermissionFlagsBits.ViewChannel)) {
+                continue;
+            }
+
             await channel.permissionOverwrites.edit(roleId, {
                 ViewChannel: true,
             }).catch(() => {});

@@ -12,6 +12,7 @@ const mplusRequestStore = require('../utils/mplusRequestStore');
 const registerCharacterSessionStore = require('../utils/registerCharacterSessionStore');
 const boosterApplicationSessionStore = require('../utils/boosterApplicationSessionStore');
 const { getDefaultCutRates, formatCutRates } = require('../utils/cutConfig');
+const { fetchCharacterData } = require('../utils/wowApi');
 
 function parseDiscordUserId(rawValue) {
     const trimmed = String(rawValue || '').trim();
@@ -146,13 +147,36 @@ async function handleModal(interaction) {
             return;
         }
 
-        const addResult = boosterApplicationSessionStore.addCharacter(sessionId, characterName, characterRealm);
-        if (!addResult.success) {
-            await interaction.editReply({ content: `❌ ${addResult.message}` });
-            return;
-        }
+        try {
+            const raiderData = await fetchCharacterData(characterName, characterRealm);
+            if (!raiderData) {
+                await interaction.editReply({
+                    content: '❌ This character could not be found on Raider.IO.\n\nPlease check that:\n- The character is maximum level\n- The character name is correct\n- The realm/server name is correct'
+                });
+                return;
+            }
 
-        await interaction.editReply(buildBoosterApplicationSessionResponse(addResult.session));
+            const canonicalName = raiderData.characterName || characterName;
+            const canonicalRealm = raiderData.realm || characterRealm;
+
+            const addResult = boosterApplicationSessionStore.addCharacter(sessionId, canonicalName, canonicalRealm);
+            if (!addResult.success) {
+                await interaction.editReply({ content: `❌ ${addResult.message}` });
+                return;
+            }
+
+            await interaction.editReply(buildBoosterApplicationSessionResponse(addResult.session));
+        } catch (error) {
+            logger.logError(error, {
+                context: 'BOOSTER_APPLICATION_CHARACTER_VALIDATION',
+                userId: interaction.user.id,
+                characterName,
+                characterRealm
+            });
+            await interaction.editReply({
+                content: '❌ There was a problem validating this character on Raider.IO. Please try again in a moment.'
+            });
+        }
         return;
     }
 

@@ -274,6 +274,24 @@ async function getApprovedClientsForEvent(eventId) {
     }
 }
 
+async function getApprovedClientGoldTotal(eventId) {
+    try {
+        const result = await Database.get(
+            `SELECT COALESCE(SUM(settled_gold), 0) AS total
+             FROM tickets
+             WHERE event_id = ?
+             AND boost_type IN ('raid', 'raid_request', 'mythic_plus')
+             AND approval_status = 'approved'`,
+            [eventId]
+        );
+
+        return Number(result?.total || 0);
+    } catch (error) {
+        logger.logError(error, { context: 'GET_APPROVED_CLIENT_GOLD_TOTAL', eventId });
+        return 0;
+    }
+}
+
 function getEventCutText(event) {
     return formatCutRates(resolveEventCutRates(event));
 }
@@ -408,6 +426,11 @@ function buildEventActionRow(eventId) {
             .setLabel('Cancel Event')
             .setStyle(ButtonStyle.Danger)
             .setEmoji('❌'),
+        new ButtonBuilder()
+            .setCustomId(`add_manual_client_${eventId}`)
+            .setLabel('Add Manual Client')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('👤'),
         new ButtonBuilder()
             .setCustomId(`view_event_admin_details_${eventId}`)
             .setLabel('Admin Details')
@@ -735,6 +758,61 @@ async function approveMythicTicket(ticketId, approvedBy, settledGold, guild) {
         return { success: true, eventId: eventResult.eventId, channel: eventResult.channel };
     } catch (error) {
         logger.logError(error, { context: 'APPROVE_MYTHIC_TICKET', ticketId, approvedBy });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
+async function addManualClientToEvent(eventId, clientId, clientCharacterName, clientCharacterRealm, settledGold, addedBy) {
+    try {
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        if (!event || event.status !== 'open') {
+            return { success: false, message: 'Event not found or not open.' };
+        }
+
+        const assignedClients = await getAssignedClientCount(eventId);
+        if (event.client_limit > 0 && assignedClients >= event.client_limit) {
+            return { success: false, message: 'This event is already full.' };
+        }
+
+        const ticketId = `ticket-${uuidv4().substring(0, 8)}`;
+        const boostType = event.event_type === 'mythic_plus' ? 'mythic_plus' : 'raid';
+
+        await Database.run(
+            `INSERT INTO tickets (
+                ticket_id, client_id, channel_id, boost_type, event_id, boost_label,
+                client_character_name, client_character_realm, boost_amount, boost_scheduled_date,
+                approval_status, approved_at, approved_by, settled_gold, status, assigned_to
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', CURRENT_TIMESTAMP, ?, ?, 'closed', ?)`,
+            [
+                ticketId,
+                clientId,
+                event.channel_id || eventId,
+                boostType,
+                event.event_id,
+                event.name,
+                clientCharacterName,
+                clientCharacterRealm,
+                1,
+                event.scheduled_date,
+                addedBy,
+                settledGold,
+                addedBy,
+            ]
+        );
+
+        await updateEventRoster(eventId);
+
+        logger.logAction('MANUAL_CLIENT_ADDED_TO_EVENT', addedBy, {
+            eventId,
+            clientId,
+            clientCharacterName,
+            clientCharacterRealm,
+            settledGold,
+        });
+
+        return { success: true, ticketId };
+    } catch (error) {
+        logger.logError(error, { context: 'ADD_MANUAL_CLIENT_TO_EVENT', eventId, clientId, addedBy });
         return { success: false, message: `Error: ${error.message}` };
     }
 }
@@ -1167,7 +1245,7 @@ async function updateEventRoster(eventId) {
 }
 
 // End event
-async function endEvent(eventId, totalGoldFromModal, endedBy) {
+async function endEvent(eventId, totalGoldFromModal, endedBy, options = {}) {
     try {
         const event = await Database.get(
             `SELECT * FROM events WHERE event_id = ?`,
@@ -1186,6 +1264,17 @@ async function endEvent(eventId, totalGoldFromModal, endedBy) {
 
         // Determine total gold: use balance_pool if available, otherwise use modal input
         const totalGold = event.balance_pool > 0 ? event.balance_pool : totalGoldFromModal;
+        const clientGoldTotal = await getApprovedClientGoldTotal(eventId);
+
+        if (!options.forceMismatch && totalGold !== clientGoldTotal) {
+            return {
+                success: false,
+                mismatchWarning: true,
+                totalGold,
+                clientGoldTotal,
+                message: `Client settled gold totals ${clientGoldTotal.toLocaleString()}g, but you entered ${totalGold.toLocaleString()}g. A client may be missing from the event.`,
+            };
+        }
 
         if (totalGold <= 0) {
             // If no gold in balance pool and no gold provided, mark as ended without payout
@@ -1501,10 +1590,12 @@ module.exports = {
     getAvailableClientRaids,
     getAssignedClientCount,
     getApprovedClientsForEvent,
+    getApprovedClientGoldTotal,
     createSelectionCancelRequest,
     approveSelectionCancelRequest,
     rejectSelectionCancelRequest,
     assignClientToEvent,
+    addManualClientToEvent,
     approveMythicTicket,
     selectCharacterForEvent,
     deselectCharacterFromEvent,

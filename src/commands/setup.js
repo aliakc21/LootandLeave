@@ -291,6 +291,42 @@ module.exports = {
                 { embeds: [clientPanelEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] }
             );
 
+            const boosterServicesChannel = await getOrCreateTextChannel(interaction.guild, 'booster-services', { parent: boosterCategoryId });
+            await applyPermissions(boosterServicesChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(managementRoleId ? [{
+                    id: managementRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(boosterRoleId ? [{
+                    id: boosterRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
+
+            const boosterServicesEmbed = new EmbedBuilder()
+                .setTitle('Booster Services')
+                .setDescription('As a booster, you can also purchase services. Use the button below to open a private ticket as a client.')
+                .setColor(0x5865F2);
+
+            await refreshManagedPanelMessage(
+                boosterServicesChannel,
+                interaction.client.user.id,
+                new Set(['create_ticket']),
+                { embeds: [boosterServicesEmbed], components: [new ActionRowBuilder().addComponents(ticketButton)] }
+            );
+
             await applyPermissions(clientCategory, [
                 {
                     id: interaction.guild.roles.everyone.id,

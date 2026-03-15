@@ -361,8 +361,12 @@ async function handleButton(interaction) {
 
     // Create ticket button
     if (customId === 'create_ticket') {
-        if (!hasPermission(interaction.member, ['admin', 'management']) && !(clientRoleId && interaction.member.roles.cache.has(clientRoleId))) {
-            await interaction.reply({ content: '❌ Choose the client path first to create a service ticket.', flags: MessageFlags.Ephemeral });
+        const isClient = clientRoleId && interaction.member.roles.cache.has(clientRoleId);
+        const isBooster = boosterRoleId && interaction.member.roles.cache.has(boosterRoleId);
+        const isStaff = hasPermission(interaction.member, ['admin', 'management']);
+
+        if (!isStaff && !isClient && !isBooster) {
+            await interaction.reply({ content: '❌ You are not allowed to create a service ticket.', flags: MessageFlags.Ephemeral });
             return;
         }
 
@@ -666,6 +670,43 @@ async function handleButton(interaction) {
         const eventId = customId.replace('end_event_', '');
         const modal = createEndEventModal(eventId);
         await interaction.showModal(modal);
+        return;
+    }
+
+    if (customId.startsWith('force_end_event:')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const [, eventId, totalGoldRaw] = customId.split(':');
+        const totalGold = parseInt(totalGoldRaw, 10);
+        const result = await calendarSystem.endEvent(eventId, totalGold, interaction.user.id, { forceMismatch: true });
+
+        if (result.success) {
+            await interaction.editReply({ content: `✅ ${result.message}` });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('add_manual_client_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const eventId = customId.replace('add_manual_client_', '');
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        if (!event) {
+            await interaction.reply({ content: '❌ Event not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const createManualEventClientModal = require('../modals/manualEventClientModal');
+        await interaction.showModal(createManualEventClientModal(eventId, event.name));
         return;
     }
 

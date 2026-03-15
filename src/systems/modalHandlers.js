@@ -13,6 +13,16 @@ const registerCharacterSessionStore = require('../utils/registerCharacterSession
 const boosterApplicationSessionStore = require('../utils/boosterApplicationSessionStore');
 const { getDefaultCutRates, formatCutRates } = require('../utils/cutConfig');
 
+function parseDiscordUserId(rawValue) {
+    const trimmed = String(rawValue || '').trim();
+    const mentionMatch = trimmed.match(/^<@!?(\d{17,20})>$/);
+    if (mentionMatch) {
+        return mentionMatch[1];
+    }
+
+    return /^\d{17,20}$/.test(trimmed) ? trimmed : null;
+}
+
 function buildMythicDungeonSelect(sessionId, runNumber) {
     const dungeonSelectMenu = new StringSelectMenuBuilder()
         .setCustomId(`ticket_mythic_dungeon_select:${sessionId}:${runNumber}`)
@@ -475,6 +485,59 @@ async function handleModal(interaction) {
         
         if (result.success) {
             await interaction.editReply({ content: `✅ ${result.message}` });
+        } else if (result.mismatchWarning) {
+            const actionRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`force_end_event:${eventId}:${totalGold}`)
+                    .setLabel('End Anyway')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('⚠️')
+            );
+            await interaction.editReply({ content: `⚠️ ${result.message}`, components: [actionRow] });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
+    if (customId.startsWith('manual_event_client_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const eventId = customId.replace('manual_event_client_modal_', '');
+        const rawClientId = interaction.fields.getTextInputValue('client_id').trim();
+        const clientCharacterName = interaction.fields.getTextInputValue('client_character_name').trim();
+        const clientCharacterRealm = interaction.fields.getTextInputValue('client_character_realm').trim();
+        const settledGold = parseInt(interaction.fields.getTextInputValue('settled_gold').trim(), 10);
+        const clientId = parseDiscordUserId(rawClientId);
+
+        if (!clientId) {
+            await interaction.editReply({ content: '❌ Enter a valid client mention or Discord ID.' });
+            return;
+        }
+
+        if (!clientCharacterName || !clientCharacterRealm) {
+            await interaction.editReply({ content: '❌ Character name and realm are required.' });
+            return;
+        }
+
+        if (Number.isNaN(settledGold) || settledGold < 0) {
+            await interaction.editReply({ content: '❌ Settled gold must be zero or a positive number.' });
+            return;
+        }
+
+        const result = await calendarSystem.addManualClientToEvent(
+            eventId,
+            clientId,
+            clientCharacterName,
+            clientCharacterRealm,
+            settledGold,
+            interaction.user.id
+        );
+
+        if (result.success) {
+            await interaction.editReply({
+                content: `✅ Manual client added to event.\nClient: <@${clientId}>\nCharacter: **${clientCharacterName}-${clientCharacterRealm}**\nSettled Gold: **${settledGold.toLocaleString()}g**`
+            });
         } else {
             await interaction.editReply({ content: `❌ ${result.message}` });
         }

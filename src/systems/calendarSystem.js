@@ -439,15 +439,39 @@ function buildEventActionRow(eventId) {
     );
 }
 
+function formatEuRealmDateTime(date) {
+    try {
+        // World of Warcraft EU realms effectively follow Europe/Paris
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Europe/Paris',
+            year: 'numeric',
+            month: 'long',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        });
+        return formatter.format(date) + ' (EU Realm Time)';
+    } catch {
+        // Fallback if Intl or the time zone is not available
+        return `${date.toISOString().replace('T', ' ').slice(0, 16)} UTC (fallback)`;
+    }
+}
+
 function buildEventEmbed(event, guild, categoryName) {
     const eventDate = new Date(event.scheduled_date);
     const eventDateTimestamp = Math.floor(eventDate.getTime() / 1000);
+    const euRealmText = formatEuRealmDateTime(eventDate);
 
     return new EmbedBuilder()
         .setTitle(`📅 ${event.name}`)
         .setDescription(event.description || 'No description provided')
         .addFields(
-            { name: '📆 Date & Time', value: `<t:${eventDateTimestamp}:F>\n<t:${eventDateTimestamp}:R>`, inline: false },
+            {
+                name: '📆 Date & Time',
+                value: `EU Realm: **${euRealmText}**\nYour local: <t:${eventDateTimestamp}:F>\n<t:${eventDateTimestamp}:R>`,
+                inline: false,
+            },
             { name: '📅 Category', value: categoryName, inline: true },
             { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
             { name: '📊 Status', value: '🟢 Applications Open', inline: true },

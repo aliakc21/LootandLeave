@@ -274,50 +274,7 @@ async function handleButton(interaction) {
         return;
     }
 
-    if (customId.startsWith('view_event_admin_details_')) {
-        if (!hasPermission(interaction.member, ['admin'])) {
-            await interaction.reply({ content: 'Only admins can view event cuts and client details.', flags: MessageFlags.Ephemeral });
-            return;
-        }
-
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const eventId = customId.replace('view_event_admin_details_', '');
-        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
-        if (!event) {
-            await interaction.editReply({ content: '❌ Event not found.' });
-            return;
-        }
-
-        const clients = await calendarSystem.getApprovedClientsForEvent(eventId);
-        const clientLines = [];
-        for (const client of clients) {
-            let memberName = `User ${client.client_id}`;
-            try {
-                const member = await interaction.guild.members.fetch(client.client_id);
-                memberName = member.displayName;
-            } catch {
-                // Keep fallback display.
-            }
-
-            const characterText = client.client_character_name && client.client_character_realm
-                ? `${client.client_character_name}-${client.client_character_realm}`
-                : 'No character provided';
-            clientLines.push(`- ${memberName} (<@${client.client_id}>) | ${characterText}${client.settled_gold ? ` | ${Number(client.settled_gold).toLocaleString()}g` : ''}`);
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle(`Admin Details - ${event.name}`)
-            .addFields(
-                { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
-                { name: '💰 Cuts', value: formatCutRates(resolveEventCutRates(event)), inline: false },
-                { name: `👤 Clients (${clients.length})`, value: clientLines.length > 0 ? clientLines.join('\n').slice(0, 1024) : 'No approved clients yet.', inline: false }
-            )
-            .setColor(0x5865F2)
-            .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
-        return;
-    }
+    // view_event_admin_details_ handler removed; admin details are now posted automatically per event
 
     if (customId.startsWith('finish_register_characters_')) {
         await interaction.update({ content: '⏳ Registering queued characters...', components: [] });

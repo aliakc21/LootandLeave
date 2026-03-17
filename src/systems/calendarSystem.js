@@ -334,6 +334,58 @@ function getEventCategoryName(event) {
     return getWeekdayName(new Date(event.scheduled_date));
 }
 
+async function ensureAdminControlsMessage(channel, event) {
+    const clients = await getApprovedClientsForEvent(event.event_id);
+    const clientLines = [];
+
+    for (const client of clients) {
+        let memberName = `User ${client.client_id}`;
+        try {
+            const member = await channel.guild.members.fetch(client.client_id);
+            memberName = member.displayName;
+        } catch {
+            // ignore, keep fallback
+        }
+
+        const characterText = client.client_character_name && client.client_character_realm
+            ? `${client.client_character_name}-${client.client_character_realm}`
+            : 'No character provided';
+
+        clientLines.push(
+            `- ${memberName} (<@${client.client_id}>) | ${characterText}${client.settled_gold ? ` | ${Number(client.settled_gold).toLocaleString()}g` : ''}`
+        );
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Admin Details - ${event.name}`)
+        .addFields(
+            { name: '🆔 Event ID', value: `\`${event.event_id}\``, inline: true },
+            { name: '💰 Cuts', value: getEventCutText(event), inline: false },
+            {
+                name: `👤 Clients (${clients.length})`,
+                value: clientLines.length > 0 ? clientLines.join('\n').slice(0, 1024) : 'No approved clients yet.',
+                inline: false,
+            }
+        )
+        .setColor(0x5865F2)
+        .setTimestamp();
+
+    const actionRow = buildEventActionRow(event.event_id);
+
+    const recentMessages = await channel.messages.fetch({ limit: 50 });
+    const existing = Array.from(recentMessages.values()).find(
+        msg =>
+            msg.author?.id === channel.client.user.id &&
+            msg.embeds?.[0]?.title === `Admin Details - ${event.name}`
+    );
+
+    if (existing) {
+        await existing.edit({ embeds: [embed], components: [actionRow] });
+    } else {
+        await channel.send({ embeds: [embed], components: [actionRow] });
+    }
+}
+
 async function ensureEventCategoryAccess(category, guild) {
     const botMember = guild.members.me;
     const requiredCategoryPermissions = [
@@ -430,12 +482,7 @@ function buildEventActionRow(eventId) {
             .setCustomId(`add_manual_client_${eventId}`)
             .setLabel('Add Manual Client')
             .setStyle(ButtonStyle.Primary)
-            .setEmoji('👤'),
-        new ButtonBuilder()
-            .setCustomId(`view_event_admin_details_${eventId}`)
-            .setLabel('Admin Details')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('🔎')
+            .setEmoji('👤')
     );
 }
 
@@ -540,19 +587,25 @@ async function ensureOpenEventInfrastructure(eventOrId, guildOverride = null) {
     }
 
     const eventEmbed = buildEventEmbed(event, guild, categoryName);
-    const actionRow = buildEventActionRow(event.event_id);
     let message = event.message_id ? await channel.messages.fetch(event.message_id).catch(() => null) : null;
 
     if (!message) {
-        message = await channel.send({ embeds: [eventEmbed], components: [actionRow] });
+        message = await channel.send({ embeds: [eventEmbed] });
     } else {
-        await message.edit({ embeds: [eventEmbed], components: [actionRow] });
+        await message.edit({ embeds: [eventEmbed], components: [] });
     }
 
     await Database.run(
         `UPDATE events SET message_id = ?, channel_id = ? WHERE event_id = ?`,
         [message.id, channel.id, event.event_id]
     );
+
+    // Ensure admin controls/details message exists or is updated
+    try {
+        await ensureAdminControlsMessage(channel, event);
+    } catch (error) {
+        logger.logError(error, { context: 'ENSURE_ADMIN_CONTROLS_MESSAGE', eventId: event.event_id, channelId: channel.id });
+    }
 
     await updateEventRoster(event.event_id);
 

@@ -308,6 +308,11 @@ function isLockBlockingEvent(lock, options = {}) {
             return false;
         }
 
+        // External locks (e.g. /savelock) always block VIP / LootShare raids for this reset
+        if (lockEventType === 'raid' && lockScope === 'external') {
+            return true;
+        }
+
         if (lockEventType !== 'raid' || lockScope !== (eventDifficulty || 'raid')) {
             return false;
         }

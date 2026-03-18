@@ -524,6 +524,27 @@ async function handleModal(interaction) {
         return;
     }
 
+    if (customId.startsWith('end_external_event_modal_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const eventId = customId.replace('end_external_event_modal_', '');
+        const confirmation = interaction.fields.getTextInputValue('confirm_text').trim().toUpperCase();
+
+        if (confirmation !== 'END') {
+            await interaction.editReply({ content: '❌ External event not ended. Type `END` exactly to confirm.' });
+            return;
+        }
+
+        const result = await calendarSystem.endEvent(eventId, 0, interaction.user.id);
+
+        if (result.success) {
+            await interaction.editReply({ content: `✅ ${result.message}` });
+        } else {
+            await interaction.editReply({ content: `❌ ${result.message}` });
+        }
+        return;
+    }
+
     if (customId.startsWith('manual_event_client_modal_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

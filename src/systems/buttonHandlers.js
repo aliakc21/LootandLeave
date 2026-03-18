@@ -667,6 +667,30 @@ async function handleButton(interaction) {
         return;
     }
 
+    // End event button
+    if (customId.startsWith('end_event_')) {
+        if (!hasPermission(interaction.member, ['admin', 'management'])) {
+            await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        const eventId = customId.replace('end_event_', '');
+        const event = await Database.get(`SELECT * FROM events WHERE event_id = ?`, [eventId]);
+        if (!event) {
+            await interaction.reply({ content: '❌ Event not found.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+
+        if (event.external_raid) {
+            const createEndExternalEventModal = require('../modals/endExternalEventModal');
+            await interaction.showModal(createEndExternalEventModal(eventId, event.name));
+        } else {
+            const modal = createEndEventModal(eventId);
+            await interaction.showModal(modal);
+        }
+        return;
+    }
+
     // Cancel event button
     if (customId.startsWith('cancel_event_')) {
         if (!hasPermission(interaction.member, ['admin', 'management'])) {

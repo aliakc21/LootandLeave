@@ -635,15 +635,28 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
     const eventDifficulty = requirements.eventDifficulty || null;
     const raidBoostType = eventType === 'raid' ? (requirements.raidBoostType || 'vip') : null;
     const customCuts = requirements.customCuts || null;
-    const categoryName = requirements.categoryName || getWeekdayName(new Date(scheduledDate));
+    const categoryName = requirements.categoryName || getEventCategoryName({ event_type: eventType, scheduled_date: scheduledDate });
+    const raidLeaderRoleId = process.env.ROLE_RAID_LEADER;
+    let isExternalRaid = false;
+
+    try {
+        if (eventType === 'raid' && raidLeaderRoleId) {
+            const member = await guild.members.fetch(createdBy).catch(() => null);
+            if (member && member.roles.cache.has(raidLeaderRoleId) && !member.permissions.has('Administrator')) {
+                isExternalRaid = true;
+            }
+        }
+    } catch (err) {
+        logger.logError(err, { context: 'DETERMINE_EXTERNAL_RAID', createdBy, eventType });
+    }
     const scheduledDateIso = new Date(scheduledDate).toISOString();
 
     let eventInserted = false;
     try {
         // Save event to database first
         await Database.run(
-            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, event_difficulty, raid_boost_type, status, min_item_level, min_rio_score, client_limit, cut_treasury_rate, cut_advertiser_rate, cut_booster_rate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO events (event_id, name, description, scheduled_date, created_by, event_type, event_difficulty, raid_boost_type, external_raid, status, min_item_level, min_rio_score, client_limit, cut_treasury_rate, cut_advertiser_rate, cut_booster_rate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 eventId,
                 eventName,
@@ -653,6 +666,7 @@ async function createEvent(eventName, description, scheduledDate, createdBy, gui
                 eventType,
                 eventDifficulty,
                 raidBoostType,
+                isExternalRaid,
                 'open',
                 minItemLevel,
                 minRioScore,
@@ -1337,6 +1351,35 @@ async function endEvent(eventId, totalGoldFromModal, endedBy, options = {}) {
         }
         if (event.status === 'cancelled') {
             return { success: false, message: 'Cannot end a cancelled event.' };
+        }
+
+        // External raids (created by raid leaders) do not go through payout flow
+        if (event.external_raid) {
+            await Database.run(
+                `UPDATE events SET status = 'ended' WHERE event_id = ?`,
+                [eventId]
+            );
+            await updateEventRoster(eventId);
+            logger.logAction('EXTERNAL_EVENT_ENDED', endedBy, { eventId, eventName: event.name });
+
+            if (event.channel_id) {
+                try {
+                    const channel = await client.channels.fetch(event.channel_id);
+                    if (channel) {
+                        await channel.send(`✅ **External Event Ended**\nThis external raid has been marked as ended by <@${endedBy}>. Payouts are handled outside LootandLeave. This channel is being archived and removed now.`);
+                        deleteEventChannelSoon(channel, eventId, event.channel_id);
+                    }
+                } catch (error) {
+                    logger.logError(error, { context: 'NOTIFY_EXTERNAL_EVENT_END', eventId });
+                }
+            }
+
+            await logChannelSystem.logEvent(event, 'ended_external', endedBy);
+
+            return {
+                success: true,
+                message: 'External raid ended. No payouts were processed by LootandLeave.',
+            };
         }
 
         // Determine total gold: use balance_pool if available, otherwise use modal input

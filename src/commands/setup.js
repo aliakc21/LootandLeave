@@ -152,6 +152,7 @@ module.exports = {
             const clientRoleId = process.env.ROLE_CLIENT;
             const managementRoleId = process.env.ROLE_MANAGEMENT;
             const adminRoleId = process.env.ROLE_ADMIN;
+            const raidLeaderRoleId = process.env.ROLE_RAID_LEADER;
             const botMember = interaction.guild.members.me;
 
             if (!clientCategoryId || !boosterCategoryId) {
@@ -416,6 +417,43 @@ module.exports = {
                 new Set(['create_event_panel']),
                 {
                     embeds: [eventPanelEmbed],
+                    components: [new ActionRowBuilder().addComponents(createEventButton)]
+                }
+            );
+
+            // External event management for raid leaders
+            const externalEventManagementChannel = await getOrCreateTextChannel(interaction.guild, 'external-event-management', {
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.roles.everyone.id,
+                        deny: [PermissionFlagsBits.ViewChannel],
+                    },
+                    {
+                        id: interaction.guild.members.me.id,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    },
+                    ...(adminRoleId ? [{
+                        id: adminRoleId,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    }] : []),
+                    ...(raidLeaderRoleId ? [{
+                        id: raidLeaderRoleId,
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                    }] : []),
+                ],
+            });
+
+            const externalEventPanelEmbed = new EmbedBuilder()
+                .setTitle('External Event Management')
+                .setDescription('Raid leaders from external communities can create raids here. All other event controls remain with LootandLeave staff.')
+                .setColor(0x5865F2);
+
+            await refreshManagedPanelMessage(
+                externalEventManagementChannel,
+                interaction.client.user.id,
+                new Set(['create_event_panel']),
+                {
+                    embeds: [externalEventPanelEmbed],
                     components: [new ActionRowBuilder().addComponents(createEventButton)]
                 }
             );

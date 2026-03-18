@@ -364,7 +364,7 @@ async function handleButton(interaction) {
     }
 
     if (customId === 'create_event_panel') {
-        if (!hasPermission(interaction.member, ['admin'])) {
+        if (!hasPermission(interaction.member, ['admin', 'raid_leader'])) {
             await interaction.reply({ content: 'You do not have permission for this action.', flags: MessageFlags.Ephemeral });
             return;
         }

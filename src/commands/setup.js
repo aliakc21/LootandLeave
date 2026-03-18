@@ -422,26 +422,25 @@ module.exports = {
             );
 
             // External event management for raid leaders
-            const externalEventManagementChannel = await getOrCreateTextChannel(interaction.guild, 'external-event-management', {
-                permissionOverwrites: [
-                    {
-                        id: interaction.guild.roles.everyone.id,
-                        deny: [PermissionFlagsBits.ViewChannel],
-                    },
-                    {
-                        id: interaction.guild.members.me.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    },
-                    ...(adminRoleId ? [{
-                        id: adminRoleId,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    }] : []),
-                    ...(raidLeaderRoleId ? [{
-                        id: raidLeaderRoleId,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-                    }] : []),
-                ],
-            });
+            const externalEventManagementChannel = await getOrCreateTextChannel(interaction.guild, 'external-event-management');
+            await applyPermissions(externalEventManagementChannel, [
+                {
+                    id: interaction.guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: interaction.guild.members.me.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                ...(adminRoleId ? [{
+                    id: adminRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+                ...(raidLeaderRoleId ? [{
+                    id: raidLeaderRoleId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                }] : []),
+            ]);
 
             const externalEventPanelEmbed = new EmbedBuilder()
                 .setTitle('External Event Management')

@@ -500,11 +500,7 @@ async function handleSelect(interaction) {
                 return;
             }
 
-            const disabledMenu = StringSelectMenuBuilder.from(interaction.component)
-                .setDisabled(true)
-                .setPlaceholder(`Selected: ${characterName}-${characterRealm}`);
-            const updatedComponents = [
-                new ActionRowBuilder().addComponents(disabledMenu),
+            const compactComponents = [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
                         .setCustomId(`deselect_char_${eventId}_${boosterId}_${characterName}_${characterRealm}`)
@@ -514,7 +510,11 @@ async function handleSelect(interaction) {
                 )
             ];
 
-            await interaction.message.edit({ components: updatedComponents });
+            await interaction.message.edit({
+                content: `<@${boosterId}> - Selected **${characterName}-${characterRealm}** for this event.`,
+                embeds: [],
+                components: compactComponents,
+            });
             await interaction.editReply({ content: '✅ Character selected for event.' });
         } catch (error) {
             logger.logError(error, { context: 'MANAGER_SELECT_CHAR', userId: interaction.user.id, eventId, boosterId });

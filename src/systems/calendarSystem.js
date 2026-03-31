@@ -1245,6 +1245,53 @@ async function rejectSelectionCancelRequest(requestId, reviewedBy) {
 
 // Update event roster embed
 async function updateEventRoster(eventId) {
+    function getCharacterRole(className, specName) {
+        const cls = (className || '').toLowerCase();
+        const spec = (specName || '').toLowerCase();
+
+        if (cls === 'warrior') {
+            return spec === 'protection' ? 'tank' : 'dps';
+        }
+        if (cls === 'paladin') {
+            if (spec === 'holy') return 'healer';
+            if (spec === 'protection') return 'tank';
+            return 'dps';
+        }
+        if (cls === 'druid') {
+            if (spec === 'guardian' || spec === 'feral tank') return 'tank';
+            if (spec === 'restoration') return 'healer';
+            return 'dps';
+        }
+        if (cls === 'monk') {
+            if (spec === 'brewmaster') return 'tank';
+            if (spec === 'mistweaver') return 'healer';
+            return 'dps';
+        }
+        if (cls === 'demon hunter') {
+            if (spec === 'vengeance') return 'tank';
+            return 'dps';
+        }
+        if (cls === 'death knight') {
+            if (spec === 'blood') return 'tank';
+            return 'dps';
+        }
+        if (cls === 'priest') {
+            if (spec === 'discipline' || spec === 'holy') return 'healer';
+            return 'dps';
+        }
+        if (cls === 'shaman') {
+            if (spec === 'restoration') return 'healer';
+            return 'dps';
+        }
+        if (cls === 'evoker') {
+            if (spec === 'preservation') return 'healer';
+            return 'dps';
+        }
+
+        // Mage, Hunter, Rogue, Warlock and others default to DPS
+        return 'dps';
+    }
+
     try {
         const event = await Database.get(
             `SELECT * FROM events WHERE event_id = ?`,
@@ -1292,10 +1339,34 @@ async function updateEventRoster(eventId) {
                     ilvl: char.item_level || 'N/A',
                     rio: char.rio_score || 'N/A',
                     class: char.class_name || 'N/A',
-                    spec: char.spec_name || 'N/A'
+                    spec: char.spec_name || 'N/A',
+                    role: getCharacterRole(char.class_name, char.spec_name)
                 });
             }
         }
+
+        const tanks = rosterEntries.filter(entry => entry.role === 'tank');
+        const healers = rosterEntries.filter(entry => entry.role === 'healer');
+        const dps = rosterEntries.filter(entry => entry.role === 'dps');
+
+        const formatEntry = entry =>
+            `${entry.booster} - **${entry.character}**\n   iLvl: ${entry.ilvl} | RIO: ${entry.rio} | ${entry.class}${entry.spec !== 'N/A' ? ` (${entry.spec})` : ''}`;
+
+        const sections = [];
+
+        if (tanks.length > 0) {
+            sections.push(`🛡️ **Tanks (${tanks.length})**\n${tanks.map(formatEntry).join('\n\n')}`);
+        }
+        if (healers.length > 0) {
+            sections.push(`💚 **Healers (${healers.length})**\n${healers.map(formatEntry).join('\n\n')}`);
+        }
+        if (dps.length > 0) {
+            sections.push(`⚔️ **DPS (${dps.length})**\n${dps.map(formatEntry).join('\n\n')}`);
+        }
+
+        const rosterText = sections.length > 0
+            ? sections.join('\n\n').slice(0, 1024)
+            : 'No characters selected yet';
 
         const eventDate = new Date(event.scheduled_date);
         const eventDateTimestamp = Math.floor(eventDate.getTime() / 1000);
@@ -1317,11 +1388,7 @@ async function updateEventRoster(eventId) {
             { name: '👤 Client Slots', value: event.client_limit > 0 ? `${assignedClients}/${event.client_limit}` : `${assignedClients}/Unlimited`, inline: true },
             { 
                 name: `👥 Roster (${rosterEntries.length})`, 
-                value: rosterEntries.length > 0 
-                    ? rosterEntries.map((entry, idx) => 
-                        `${idx + 1}. ${entry.booster} - **${entry.character}**\n   iLvl: ${entry.ilvl} | RIO: ${entry.rio} | ${entry.class}${entry.spec !== 'N/A' ? ` (${entry.spec})` : ''}`
-                      ).join('\n\n')
-                    : 'No characters selected yet',
+                value: rosterText,
                 inline: false 
             },
             { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }

@@ -286,6 +286,57 @@ async function refreshStaleCharactersBatch(limit = getCharacterRefreshBatchSize(
     }
 }
 
+async function removeCharacter(boosterId, characterName, characterRealm) {
+    try {
+        const existing = await findExistingCharacterCaseInsensitive(boosterId, characterName, characterRealm);
+        if (!existing) {
+            return {
+                success: false,
+                message: `No registered character found for ${characterName}-${characterRealm}.`,
+            };
+        }
+
+        const now = new Date().toISOString();
+        const activeLocks = await Database.all(
+            `SELECT *
+             FROM character_weekly_locks
+             WHERE booster_id = ?
+             AND LOWER(character_name) = LOWER(?)
+             AND LOWER(character_realm) = LOWER(?)
+             AND locked_until > ?`,
+            [boosterId, existing.character_name, existing.character_realm, now]
+        );
+
+        if (activeLocks.length > 0) {
+            return {
+                success: false,
+                message: 'This character currently has an active raid lock and cannot be removed until after the reset or it is unlocked by management.',
+            };
+        }
+
+        await Database.run(
+            `DELETE FROM characters
+             WHERE booster_id = ?
+             AND LOWER(character_name) = LOWER(?)
+             AND LOWER(character_realm) = LOWER(?)`,
+            [boosterId, existing.character_name, existing.character_realm]
+        );
+
+        logger.logAction('CHARACTER_REMOVED', boosterId, {
+            characterName: existing.character_name,
+            characterRealm: existing.character_realm,
+        });
+
+        return {
+            success: true,
+            message: `Removed character ${existing.character_name}-${existing.character_realm} from your registered list.`,
+        };
+    } catch (error) {
+        logger.logError(error, { context: 'REMOVE_CHARACTER', boosterId, characterName, characterRealm });
+        return { success: false, message: `Error: ${error.message}` };
+    }
+}
+
 // Get available (unlocked) characters for a booster
 function isLockBlockingEvent(lock, options = {}) {
     const eventType = options.eventType || null;
@@ -528,4 +579,5 @@ module.exports = {
     registerMultipleCharacters,
     registerCharacterEntries,
     getCharacterRefreshIntervalMinutes,
+    removeCharacter,
 };

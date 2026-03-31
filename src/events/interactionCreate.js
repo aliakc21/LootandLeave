@@ -5,6 +5,30 @@ const modalHandlers = require('../systems/modalHandlers');
 const selectHandlers = require('../systems/selectHandlers');
 const { scheduleEphemeralCleanup } = require('../utils/interactionCleanup');
 
+function isUnknownDiscordMessageError(error) {
+    return Boolean(error?.code === 10008 || error?.rawError?.code === 10008);
+}
+
+async function safeSendInteractionError(interaction, errorMessage) {
+    try {
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
+        } else {
+            await interaction.reply(errorMessage);
+        }
+    } catch (responseError) {
+        if (isUnknownDiscordMessageError(responseError)) {
+            logger.logDebug?.('Skipped interaction error response because original message is no longer available.', {
+                customId: interaction.customId || null,
+                commandName: interaction.commandName || null,
+                userId: interaction.user?.id || null,
+            });
+            return;
+        }
+        throw responseError;
+    }
+}
+
 function hasOnboardingAccess(member) {
     if (!member) {
         return false;
@@ -50,11 +74,7 @@ module.exports = {
                 logger.logError(error, { context: 'COMMAND_EXECUTION', commandName: interaction.commandName, userId: interaction.user.id });
                 
                 const errorMessage = { content: 'An error occurred while executing the command!', flags: MessageFlags.Ephemeral };
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp(errorMessage);
-                } else {
-                    await interaction.reply(errorMessage);
-                }
+                await safeSendInteractionError(interaction, errorMessage);
             } finally {
                 scheduleEphemeralCleanup(interaction);
             }
@@ -65,11 +85,7 @@ module.exports = {
                 logger.logError(error, { context: 'BUTTON_HANDLER', customId: interaction.customId, userId: interaction.user.id });
                 
                 const errorMessage = { content: 'An error occurred while handling the button!', flags: MessageFlags.Ephemeral };
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp(errorMessage);
-                } else {
-                    await interaction.reply(errorMessage);
-                }
+                await safeSendInteractionError(interaction, errorMessage);
             } finally {
                 scheduleEphemeralCleanup(interaction);
             }
@@ -80,11 +96,7 @@ module.exports = {
                 logger.logError(error, { context: 'MODAL_HANDLER', customId: interaction.customId, userId: interaction.user.id });
                 
                 const errorMessage = { content: 'An error occurred while handling the modal!', flags: MessageFlags.Ephemeral };
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp(errorMessage);
-                } else {
-                    await interaction.reply(errorMessage);
-                }
+                await safeSendInteractionError(interaction, errorMessage);
             } finally {
                 scheduleEphemeralCleanup(interaction);
             }
@@ -95,11 +107,7 @@ module.exports = {
                 logger.logError(error, { context: 'SELECT_HANDLER', customId: interaction.customId, userId: interaction.user.id });
                 
                 const errorMessage = { content: 'An error occurred while handling the select menu!', flags: MessageFlags.Ephemeral };
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp(errorMessage);
-                } else {
-                    await interaction.reply(errorMessage);
-                }
+                await safeSendInteractionError(interaction, errorMessage);
             } finally {
                 scheduleEphemeralCleanup(interaction);
             }

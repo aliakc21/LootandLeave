@@ -95,15 +95,19 @@ module.exports = {
             }
 
             // Send to channel (not ephemeral) so managers can see and select
-            await interaction.deleteReply();
             await interaction.channel.send({ 
                 embeds: [embed],
                 content: `<@${interaction.user.id}> listed their available characters:`,
                 components: components.length > 0 ? components : undefined
             });
+            await interaction.editReply({ content: '✅ Listed your available characters in this event channel.' });
         } catch (error) {
             logger.logError(error, { context: 'LIST_CHARACTERS_COMMAND', userId: interaction.user.id });
-            await interaction.editReply({ content: `❌ Error: ${error.message}` });
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral });
+            } else {
+                await interaction.reply({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral });
+            }
         }
     },
 };

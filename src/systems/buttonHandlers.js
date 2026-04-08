@@ -47,6 +47,23 @@ async function handleButton(interaction) {
     const boosterRoleId = process.env.ROLE_BOOSTER;
     const applicantRoleId = process.env.ROLE_BOOSTER_APPLICANT;
 
+    // Booster Signup button on event details (acts like /listcharacters)
+    if (customId === 'booster_signup') {
+        try {
+            const listCharacters = require('../commands/listcharacters');
+            // Let the command handle replies/defer and validations
+            await listCharacters.execute(interaction);
+        } catch (error) {
+            logger.logError(error, { context: 'BOOSTER_SIGNUP_BUTTON', userId: interaction.user.id, channelId: interaction.channel?.id });
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '❌ An error occurred while listing your characters.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            } else {
+                await interaction.reply({ content: '❌ An error occurred while listing your characters.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
+        }
+        return;
+    }
+
     if (customId === 'choose_role_client') {
         if (!clientRoleId) {
             await interaction.reply({ content: '❌ ROLE_CLIENT is not configured.', flags: MessageFlags.Ephemeral });

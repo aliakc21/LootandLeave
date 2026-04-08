@@ -486,6 +486,17 @@ function buildEventActionRow(eventId) {
     );
 }
 
+function buildBoosterSignupRow(eventId) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            // Channel-scoped; eventId included for analytics/consistency, but not required for behavior
+            .setCustomId('booster_signup')
+            .setLabel('Signup')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('📝')
+    );
+}
+
 function formatEuRealmDateTime(date) {
     try {
         // World of Warcraft EU realms effectively follow Europe/Paris
@@ -530,7 +541,7 @@ function buildEventEmbed(event, guild, categoryName) {
             { name: '🏆 Min Raider.IO', value: String(event.min_rio_score || 0), inline: true },
             { name: '👤 Client Slots', value: event.client_limit === 0 ? 'Unlimited' : `0/${event.client_limit}`, inline: true },
             { name: '👥 Roster', value: 'No characters selected yet', inline: false },
-            { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
+            { name: 'ℹ️ Instructions', value: 'Click the Signup button below to list your available characters. Managers will select characters from your list.', inline: false }
         )
         .setImage(event.event_type === 'mythic_plus' ? getDungeonImageUrl(event.name) : getRaidImageUrl(event.name))
         .setColor(0x5865F2)
@@ -590,9 +601,9 @@ async function ensureOpenEventInfrastructure(eventOrId, guildOverride = null) {
     let message = event.message_id ? await channel.messages.fetch(event.message_id).catch(() => null) : null;
 
     if (!message) {
-        message = await channel.send({ embeds: [eventEmbed] });
+        message = await channel.send({ embeds: [eventEmbed], components: [buildBoosterSignupRow(event.event_id)] });
     } else {
-        await message.edit({ embeds: [eventEmbed], components: [] });
+        await message.edit({ embeds: [eventEmbed], components: [buildBoosterSignupRow(event.event_id)] });
     }
 
     await Database.run(
@@ -1391,12 +1402,12 @@ async function updateEventRoster(eventId) {
                 value: rosterText,
                 inline: false 
             },
-            { name: 'ℹ️ Instructions', value: 'Use `/listcharacters` in this channel to list your available characters. Managers will select characters from the list.', inline: false }
+            { name: 'ℹ️ Instructions', value: 'Click the Signup button below to list your available characters. Managers will select characters from your list.', inline: false }
         );
         eventEmbed.setImage(event.event_type === 'mythic_plus' ? getDungeonImageUrl(event.name) : getRaidImageUrl(event.name));
 
         // Keep the buttons
-        await message.edit({ embeds: [eventEmbed] });
+        await message.edit({ embeds: [eventEmbed], components: [buildBoosterSignupRow(eventId)] });
     } catch (error) {
         logger.logError(error, { context: 'UPDATE_EVENT_ROSTER', eventId });
     }
